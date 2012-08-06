@@ -9,7 +9,7 @@
 %% Application callbacks
 %% ===================================================================
 
-start(_StartType, _StartArgs) ->
+start(normal, no_args) ->
     openCitadels_server_sup:start_link().
 
 stop(_State) ->
