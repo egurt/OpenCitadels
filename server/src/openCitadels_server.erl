@@ -6,7 +6,8 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([start_link/0]).
+-export([start_link/0, setup/1, register/0, quit/0,
+	 players/0, status/0, status/1, move/2]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -23,7 +24,7 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, no_args, []).
 
 setup(ClientID) ->
-    gen_server:call(?MODULE, {setup, ClientID}).
+    gen_server:call(?SERVER, {setup, ClientID}).
 
 register() ->
     ok.
@@ -54,7 +55,7 @@ move(Type, Args) ->
 %% ------------------------------------------------------------------
 
 init(no_args) ->
-    {ok, Args}.
+    {ok, #state{}}.
 
 
 handle_call({setup, ClientID}, _From, State) ->
