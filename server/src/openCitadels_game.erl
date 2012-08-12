@@ -14,7 +14,7 @@
         , code_change/4
         ]).
 
--record(player_state,
+-record(ps,
         {player_id %The identifier of the current player
          ,current_character = none %The character this player is
          ,districts = [] %The districts the player has built
@@ -23,7 +23,7 @@
          ,effects = [] %assassinated, stolen from, other?
         }).
 
--record(game_state,
+-record(gs,
         {game_id %How a game instance is identified by the server (static)
          ,server_pid %For communicating errors and the like (static)
          ,player_order = [] %The order the players go (static)
@@ -72,9 +72,13 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% Transition Definitions
 %% ------------------------------------------------------------------
 
-%Selecting Characters
+% Selecting Characters
 take_card(Pid, Player, Card) ->
     gen_fsm:sync_send_event(Pid, {take_card, Player, Card}).
+
+% Take an action
+take(Pid, Player, Choice) ->
+    gen_fsm:sync_send_event(Pid, {take_an_action, Player, Choice}).
 
 %% ------------------------------------------------------------------
 %% State Definitions
@@ -82,7 +86,7 @@ take_card(Pid, Player, Card) ->
 
 deal_cards( {take_card, Player, Card}
           , _From
-          , #game_state{current_player = CurrentPlayer
+          , #gs{current_player = CurrentPlayer
                         ,players = Players
                         ,player_order = PlayerOrder
                         ,character_deck = CDeck
@@ -92,13 +96,13 @@ deal_cards( {take_card, Player, Card}
     case {CurrentPlayerID =:= Player,
           lists:member(Card, CDeck)} of
         {true, true} -> %Correct player's turn, card is available
-            PlayerState = get_player_state(CurrentPlayerID, State),
+            PlayerState = get_ps(CurrentPlayerID, State),
             NewPlayerState = 
-                PlayerState#player_state{current_character = Card},
+                PlayerState#ps{current_character = Card},
             OtherPlayers = lists:delete(PlayerState, Players),
             NewDeck = lists:delete(Card, CDeck),
             NextPlayer = (CurrentPlayer rem length(PlayerOrder)) + 1,
-            NewState = State#game_state{current_player = NextPlayer
+            NewState = State#gs{current_player = NextPlayer
                                        ,players = [NewPlayerState | OtherPlayers]
                                        ,character_deck = NewDeck},
 
@@ -112,15 +116,63 @@ deal_cards( {take_card, Player, Card}
             {reply, {error, wrong_player}, deal_cards, State}
     end.
 
-pre_play_init(#game_state{players = Players} = State) ->
-    %Could possibly just sort the characters, depending on representation
-    Fun = fun(#player_state{current_character = C, player_id = P}) -> {C, P} end,
-    Selected = lists:map(Fun, Players),
-    %If cards can be sorted in correct order, this would not be necessary
-    SelectedInOrder = 
-	lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
-    NewState = State#game_state{character_order = SelectedInOrder},
-    NewState.
+take_an_action({take_an_action, PlayerID, gold}, _From, 
+	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
+    PlayerState = get_ps(PlayerID, State),
+    Money = PlayerState#ps.money,
+    NewState = update_ps(PlayerState#ps{money = Money + 2}, State),
+    {reply, ok, build_district, NewState};
+take_an_action({take_an_action, PlayerID, cards}, _From, 
+	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
+    {reply, ok, choose_card, State};
+take_an_action(_, _, State) ->
+    {reply, {error, 'WRONG!'}, take_an_action, State}.
+    
+
+take_an_action_2({choose_card, PlayerID, Card}, _From,
+		 #gs{character_order = [{_Char, PlayerID} | _],
+		    district_deck = [C1, C2 | Deck]} = State) ->
+    case lists:member(Card, [C1, C2]) of
+	true -> PS = get_ps(PlayerID, State),
+		NewPS = PS#ps{hand = [Card | PS#ps.hand]},
+		NewState = update_ps(NewPS, State#gs{district_deck = Deck}),
+		{reply, ok, build_district, NewState};
+	false -> {reply, {error, bad_card}, take_an_action_2, State}
+    end;
+take_an_action_2(_, _, State) ->
+    {reply, {error, 'WRONG!'}, take_an_action_2, State}.
+
+build_district({build_district, PlayerID, Card}, _From,
+	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
+    PS = get_ps(PlayerID, State),
+    Hand = PS#ps.hand,
+    Money = PS#ps.money,
+    Districts = PS#ps.districts,
+    Cost = district_cost(Card),
+    case {lists:member(Card, Hand),
+	  Cost > Money} of
+	{false, _} ->
+	    {reply, {error, bad_card}, build_district, State};
+	{_, false} ->
+	    {reply, {error, no_money}, build_district, State};
+	{true, true} ->
+	    NewPS = PS#ps{hand = lists:delete(Card, Hand),
+			  money = Money - Cost,
+			  districts = [Card | Districts]},
+	    NewState = update_ps(NewPS, State),
+	    {reply, ok, build_district, NewState}
+    end;
+build_district({end_turn, PlayerID, _}, _From,
+	       #gs{character_order = [{_Char, PlayerID}]} = State) ->
+    %Check for end game conditions etc.
+    {reply, ok, deal_cards, pre_deal_cards(State)};
+build_district({end_turn, PlayerID, _}, _From,
+	       #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
+    {reply, ok, take_an_action, State#gs{character_order = Players}};
+build_district(_, _, State) ->
+    {reply, {error, 'WRONG!'}, build_district, State}.
+
+
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -128,13 +180,13 @@ pre_play_init(#game_state{players = Players} = State) ->
 
 init_state(Options) ->
     DistrictDeck = shuffle_deck(district_list()),
-    init_state(Options, #game_state{district_deck = DistrictDeck}).
+    init_state(Options, #gs{district_deck = DistrictDeck}).
 init_state([], State) ->
     pre_deal_cards(State);
 init_state([{players, Players} | Options], 
-           #game_state{district_deck = DistrictDeck} = State) ->
-    {PlayerStates, DDeck} = initialise_player_states(Players, DistrictDeck),
-    NewState = State#game_state{players = PlayerStates
+           #gs{district_deck = DistrictDeck} = State) ->
+    {PlayerStates, DDeck} = initialise_pss(Players, DistrictDeck),
+    NewState = State#gs{players = PlayerStates
                                 ,district_deck = DDeck
                                 ,player_order = Players
                                 ,first_player = 1
@@ -142,48 +194,48 @@ init_state([{players, Players} | Options],
                                },
     init_state(Options, NewState);
 init_state([{server_pid, ServerPid} | Options], State) ->
-    NewState = State#game_state{server_pid = ServerPid},
+    NewState = State#gs{server_pid = ServerPid},
     init_state(Options, NewState);
 init_state([{game_id, GameID} | Options], State) ->
-    NewState = State#game_state{game_id = GameID},
+    NewState = State#gs{game_id = GameID},
     init_state(Options, NewState);
 init_state([_ | Options], State) ->
     init_state(Options, State).
 
 % Makes initial states for each player
-initialise_player_states([], DDeck) ->
+initialise_pss([], DDeck) ->
     {[], DDeck};
-initialise_player_states([Player | Players], [D1, D2, D3, D4 | DDeck]) ->
-    {PlayerList, DistrictDeck} = initialise_player_states(Players, DDeck),
-    {[#player_state{player_id = Player, hand = [D1,D2,D3,D4]} |
+initialise_pss([Player | Players], [D1, D2, D3, D4 | DDeck]) ->
+    {PlayerList, DistrictDeck} = initialise_pss(Players, DDeck),
+    {[#ps{player_id = Player, hand = [D1,D2,D3,D4]} |
       PlayerList], DistrictDeck}.
 
-% Retrieves player id of player nr Player from GameState
-get_player_id(Player, #game_state{player_order = PlayerOrder}) ->
-    lists:nth(Player, PlayerOrder);
-get_player_id(Player, PlayerOrder) ->
-    lists:nth(Player, PlayerOrder).
-
-% Retrieves a player's state given the players id
-get_player_state(PlayerID, #game_state{players = Players}) ->
-    lists:keyfind(PlayerID, #player_state.player_id, Players).
-%    {[PlayerState], _} = 
-%        lists:partition(fun(P) -> P#player_state.player_id =:= PlayerID end, Players).
+pre_play_init(#gs{players = Players} = State) ->
+    %Could possibly just sort the characters, depending on representation
+    Fun = fun(#ps{current_character = C, player_id = P}) -> {C, P} end,
+    Selected = lists:map(Fun, Players),
+    %If cards can be sorted in correct order, this would not be necessary
+    SelectedInOrder = 
+	lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
+    NewState = State#gs{character_order = SelectedInOrder},
+    NewState.
 
 % Initialise gamestate for dealing character cards
 pre_deal_cards(GameState) ->
-    pre_deal_cards(GameState, num_players(GameState)).
+    pre_deal_cards(GameState#gs{character_order = []
+			       ,current_player = GameState#gs.first_player}, 
+		   num_players(GameState)).
 pre_deal_cards(GameState, 5) ->
     [FaceDown , FaceUp , MaybeFaceUp | CDeck] = shuffle_deck(character_list()),
     case FaceUp of
         {4, king} ->
-            GameState#game_state{character_deck = [FaceUp | CDeck]
-                                 ,face_down = [FaceDown]
-                                 ,face_up = [MaybeFaceUp]};
+            GameState#gs{character_deck = [FaceUp | CDeck]
+			 ,face_down = [FaceDown]
+			 ,face_up = [MaybeFaceUp]};
         _ ->
-            GameState#game_state{character_deck = [MaybeFaceUp | CDeck]
-                                 ,face_down = [FaceDown]
-                                 ,face_up = [FaceUp]}
+            GameState#gs{character_deck = [MaybeFaceUp | CDeck]
+			 ,face_down = [FaceDown]
+			 ,face_up = [FaceUp]}
     end;
 pre_deal_cards(_, _) ->
     {error, "No rules for this amount of players."}.
@@ -194,8 +246,26 @@ shuffle_deck(List) ->
     SortedModList = lists:sort(ModList),
     lists:map(fun({_, E}) -> E end, SortedModList).
 
-num_players(#game_state{player_order = PlayerOrder}) ->
+% Number of players in game
+num_players(#gs{player_order = PlayerOrder}) ->
     length(PlayerOrder).
+
+% Retrieves player id of player nr Player from GameState
+get_player_id(Player, #gs{player_order = PlayerOrder}) ->
+    lists:nth(Player, PlayerOrder);
+get_player_id(Player, PlayerOrder) ->
+    lists:nth(Player, PlayerOrder).
+
+% Retrieves a player's state given the players id
+get_ps(PlayerID, #gs{players = Players}) ->
+    lists:keyfind(PlayerID, #ps.player_id, Players).
+
+% Updates gamestate with the new player state
+update_ps(#ps{player_id = PlayerID} = PlayerState, 
+		    #gs{players = Players} = GameState) ->
+    NewPlayers =
+	lists:keyreplace(PlayerID, #ps.player_id, Players, PlayerState),
+    GameState#gs{players = NewPlayers}.
 
 %% ------------------------------------------------------------------
 %% Test Functions
@@ -216,6 +286,10 @@ character_list() ->
      ,{7, architect}
      ,{8, warlord}].
 
+% Get district cost
+district_cost({C, _}) ->
+    C.
+
 % Get list of district cards in the game
 district_list() ->
     Base = [{X, Y} || X <- [1,2,3,4,5],
@@ -232,30 +306,30 @@ option_list() ->
 test() ->
     InitState = init_state(option_list()),
     [First, Second, Third, Fourth, Fifth | _Rest] = 
-        InitState#game_state.character_deck,
+        InitState#gs.character_deck,
     {_, _, NewState1} =
         deal_cards({take_card, 
-                    get_player_id(InitState#game_state.current_player, InitState), 
+                    get_player_id(InitState#gs.current_player, InitState), 
                     First}, lol,
                    InitState),
     {_, _, NewState2} =
         deal_cards({take_card,
-                    get_player_id(NewState1#game_state.current_player, NewState1), 
+                    get_player_id(NewState1#gs.current_player, NewState1), 
                     Second}, lol,
                    NewState1),
     {_, _, NewState3} =
         deal_cards({take_card, 
-                    get_player_id(NewState2#game_state.current_player, NewState2), 
+                    get_player_id(NewState2#gs.current_player, NewState2), 
                     Third},lol ,
                    NewState2),
     {_, _, NewState4} =
         deal_cards({take_card, 
-                    get_player_id(NewState3#game_state.current_player, NewState3), 
+                    get_player_id(NewState3#gs.current_player, NewState3), 
                     Fourth},lol,
                    NewState3),
     %{_, _, NewState} =
         deal_cards({take_card, 
-                    get_player_id(NewState4#game_state.current_player, NewState4), 
+                    get_player_id(NewState4#gs.current_player, NewState4), 
                     Fifth},lol,
                    NewState4).
 
