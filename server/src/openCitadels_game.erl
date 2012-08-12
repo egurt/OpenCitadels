@@ -3,6 +3,17 @@
 
 -compile(export_all). %% Fix this later!
 
+-export([ start_link/1
+        ]).
+
+-export([ init/1
+        , handle_event/3
+        , handle_info/3
+        , handle_sync_event/4
+        , terminate/3
+        , code_change/4
+        ]).
+
 -record(player_state,
         {player_id %The identifier of the current player
          ,current_character = none %The character this player is
@@ -35,7 +46,27 @@ start_link(Data) ->
 
 init(_Data) ->
     random:seed(erlang:now()),
-    {ok, select_character}.
+    {ok, deal_cards, init_state(_Data)}.
+
+%% stubs
+handle_event(_Event, StateName, StateData) ->
+    {next_state, StateName, StateData}.
+
+handle_info(_Info, StateName, StateData) ->
+    {next_state, StateName, StateData}.
+
+handle_sync_event(_Event, _From, StateName, StateData) ->
+    {next_state, StateName, StateData}.
+%%  {reply, Reply, StateName, StateData}.
+
+terminate(_Reason, _StateName, _StateData) ->
+    whatever.
+
+
+
+code_change(_OldVsn, StateName, StateData, _Extra) ->
+    {ok, StateName, StateData}.
+
 
 %% ------------------------------------------------------------------
 %% Transition Definitions
@@ -197,7 +228,7 @@ option_list() ->
 
 test() ->
     InitState = init_state(option_list()),
-    [First, Second, Third, Fourth, Fifth | Rest] = 
+    [First, Second, Third, Fourth, Fifth | _Rest] = 
         InitState#game_state.character_deck,
     {_, _, NewState1} =
         deal_cards({take_card, 
