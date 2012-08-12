@@ -103,7 +103,7 @@ deal_cards({take_card, Player, Card},
 
             if NextPlayer =/= FirstPlayer -> 
                     {next_state, deal_cards, NewState};
-               true -> play(NewState)
+               true -> {next_state, deal_cards, State} %For debugging?
             end;
 
         _ -> {next_state, deal_cards, State}
@@ -165,7 +165,7 @@ get_player_id(Player, PlayerOrder) ->
 get_player_state(PlayerID, #game_state{players = Players}) ->
     lists:keyfind(PlayerID, #player_state.player_id, Players).
 %    {[PlayerState], _} = 
-%       lists:partition(fun(P) -> P#player_state.player_id =:= PlayerID end, Players).
+%        lists:partition(fun(P) -> P#player_state.player_id =:= PlayerID end, Players).
 
 % Initialise gamestate for dealing character cards
 pre_deal_cards(GameState) ->
