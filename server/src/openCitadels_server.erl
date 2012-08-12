@@ -9,7 +9,7 @@
 
 -export([ start_link/0
         , setup/2
-        , register/1
+        , register/0
         , list_players/1
         , state/0
         , status/0
@@ -50,8 +50,8 @@ start_link() ->
 setup(ClientIDs, Options) ->
     gen_server:call(?SERVER, {setup, ClientIDs, Options}).
 
-register(Pid) ->
-    gen_server:call(?SERVER, {register, Pid}).
+register() ->
+    gen_server:call(?SERVER, {register, self()}).
 
 list_players(GameID) ->
     gen_server:call(?SERVER, {list_players, GameID}).
@@ -68,8 +68,8 @@ game_status(_GameID) ->
 game_status(_GameID, _Player) ->
     ok.
 
-move(GameID, PlayerID, Move, Args) ->
-    gen_server:cast(?SERVER, {move, GameID, PlayerID, Move, Args}).
+move(GameID, PlayerID, Move, Data) ->
+    gen_server:call(?SERVER, {move, GameID, PlayerID, Move, Data}).
 
 send(GameID, PlayerID, Message) ->
     gen_server:cast(?SERVER, {send, GameID, PlayerID, Message}).
@@ -116,17 +116,17 @@ handle_call({list_players, GameID}, _From, State) ->
     end,
     {reply, Reply, State};
 
+handle_call({move, GameID, PlayerID, Move, Data}, _From, State) ->
+    Pid = (gamefind(GameID, State))#game.pid,
+    Reply = ?GAME:Move(Pid, PlayerID, Data),
+    {reply, Reply, State};
+
 handle_call(state, _From, State) ->
     {reply, State, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-
-handle_cast({move, GameID, PlayerID, Move, Data}, State) ->
-    Pid = (gamefind(GameID, State))#game.pid,
-    ?GAME:Move(Pid, PlayerID, Data),
-    {noreply, State};
 
 handle_cast({send, GameID, all, Message}, State) ->
     PlayerIDs = (gamefind(GameID, State))#game.players,
