@@ -4,6 +4,12 @@
 -compile(export_all). %% Fix this later!
 
 -export([ start_link/1
+        , state/1
+        , pick_character/3
+        , take/3
+        , choose/3
+        , build/3
+        , end_turn/3
         ]).
 
 -export([ init/1
@@ -44,6 +50,9 @@
 start_link(Data) ->
     gen_fsm:start_link(?MODULE, Data, []).
 
+state(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, state).
+
 init(_Data) ->
     random:seed(erlang:now()),
     {ok, deal_cards, init_state(_Data)}.
@@ -52,12 +61,17 @@ init(_Data) ->
 handle_event(_Event, StateName, StateData) ->
     {next_state, StateName, StateData}.
 
+
 handle_info(_Info, StateName, StateData) ->
     {next_state, StateName, StateData}.
 
+
+handle_sync_event(state, _From, StateName, StateData) ->
+    {reply, {StateName, StateData}, StateName, StateData};
+
 handle_sync_event(_Event, _From, StateName, StateData) ->
     {next_state, StateName, StateData}.
-%%  {reply, Reply, StateName, StateData}.
+
 
 terminate(_Reason, _StateName, _StateData) ->
     whatever.
@@ -73,12 +87,21 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% ------------------------------------------------------------------
 
 % Selecting Characters
-take_card(Pid, Player, Card) ->
+pick_character(Pid, Player, Card) ->
     gen_fsm:sync_send_event(Pid, {take_card, Player, Card}).
 
 % Take an action
 take(Pid, Player, Choice) ->
     gen_fsm:sync_send_event(Pid, {take_an_action, Player, Choice}).
+
+choose(Pid, Player, Card) ->
+    gen_fsm:sync_send_event(Pid, {choose_card, Player, Card}).
+
+build(Pid, Player, District) ->
+    gen_fsm:sync_send_event(Pid, {build_district, Player, District}).
+
+end_turn(Pid, Player, _Null) ->
+    gen_fsm:sync_send_event(Pid, {end_turn, Player, _Null}).
 
 %% ------------------------------------------------------------------
 %% State Definitions
@@ -87,10 +110,10 @@ take(Pid, Player, Choice) ->
 deal_cards( {take_card, Player, Card}
           , _From
           , #gs{current_player = CurrentPlayer
-                        ,players = Players
-                        ,player_order = PlayerOrder
-                        ,character_deck = CDeck
-                        ,first_player = FirstPlayer} = State) ->
+               ,players = Players
+               ,player_order = PlayerOrder
+               ,character_deck = CDeck
+               ,first_player = FirstPlayer} = State) ->
 
     CurrentPlayerID = get_player_id(CurrentPlayer, PlayerOrder),
     case {CurrentPlayerID =:= Player,
@@ -108,7 +131,7 @@ deal_cards( {take_card, Player, Card}
 
             case NextPlayer =/= FirstPlayer of
                true  -> {reply, ok, deal_cards, NewState};
-               false -> {reply, ok, play, pre_play_init(NewState)}
+               false -> {reply, ok, take_an_action, pre_play_init(NewState)}
             end;
         {true, false} ->
             {reply, {error, no_card}, deal_cards, State};
@@ -124,7 +147,7 @@ take_an_action({take_an_action, PlayerID, gold}, _From,
     {reply, ok, build_district, NewState};
 take_an_action({take_an_action, PlayerID, cards}, _From, 
 	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
-    {reply, ok, choose_card, State};
+    {reply, ok, take_an_action_2, State};
 take_an_action(_, _, State) ->
     {reply, {error, 'WRONG!'}, take_an_action, State}.
     
@@ -150,7 +173,7 @@ build_district({build_district, PlayerID, Card}, _From,
     Districts = PS#ps.districts,
     Cost = district_cost(Card),
     case {lists:member(Card, Hand),
-	  Cost > Money} of
+	  Cost =< Money} of
 	{false, _} ->
 	    {reply, {error, bad_card}, build_district, State};
 	{_, false} ->
@@ -160,17 +183,21 @@ build_district({build_district, PlayerID, Card}, _From,
 			  money = Money - Cost,
 			  districts = [Card | Districts]},
 	    NewState = update_ps(NewPS, State),
-	    {reply, ok, build_district, NewState}
+	    {reply, ok, post_build, NewState}
     end;
-build_district({end_turn, PlayerID, _}, _From,
+build_district(_, _, State) ->
+    {reply, {error, 'WRONG!'}, build_district, State}.
+
+
+post_build({end_turn, PlayerID, _}, _From,
 	       #gs{character_order = [{_Char, PlayerID}]} = State) ->
     %Check for end game conditions etc.
     {reply, ok, deal_cards, pre_deal_cards(State)};
-build_district({end_turn, PlayerID, _}, _From,
+post_build({end_turn, PlayerID, _}, _From,
 	       #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
     {reply, ok, take_an_action, State#gs{character_order = Players}};
-build_district(_, _, State) ->
-    {reply, {error, 'WRONG!'}, build_district, State}.
+post_build(_, _, State) ->
+    {reply, {error, 'WRONG!'}, post_build, State}.
 
 
 
