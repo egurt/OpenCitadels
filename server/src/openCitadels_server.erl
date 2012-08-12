@@ -79,6 +79,7 @@ send(GameID, PlayerID, Message) ->
 %% ------------------------------------------------------------------
 
 init(no_args) ->
+    process_flag(trap_exit, true),
     {ok, #state{}}.
 
 
@@ -140,6 +141,18 @@ handle_cast({send, GameID, PlayerID, Message}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+
+handle_info({'EXIT', Pid, Reason}, #state{games = Games} = State) ->
+    case lists:keytake(Pid, #game.pid, Games) of
+        {value, Game, NewGames} ->
+            Fun = fun (P) ->
+                send(Game#game.id, P, {"Game terminated", Reason})
+            end,
+            lists:foreach(Fun, Game#game.players), 
+            {noreply, State#state{games = NewGames}};
+        _ ->
+            {noreply, State}
+    end;
 
 handle_info(_Info, State) ->
     {noreply, State}.
