@@ -74,18 +74,19 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 
 %Selecting Characters
 take_card(Pid, Player, Card) ->
-    gen_fsm:send_event(Pid, {take_card, Player, Card}).
+    gen_fsm:sync_send_event(Pid, {take_card, Player, Card}).
 
 %% ------------------------------------------------------------------
 %% State Definitions
 %% ------------------------------------------------------------------
 
-deal_cards({take_card, Player, Card}, 
-           #game_state{current_player = CurrentPlayer
-                       ,players = Players
-                       ,player_order = PlayerOrder
-                       ,character_deck = CDeck
-                       ,first_player = FirstPlayer} = State) ->
+deal_cards( {take_card, Player, Card}
+          , _From
+          , #game_state{current_player = CurrentPlayer
+                        ,players = Players
+                        ,player_order = PlayerOrder
+                        ,character_deck = CDeck
+                        ,first_player = FirstPlayer} = State) ->
 
     CurrentPlayerID = get_player_id(CurrentPlayer, PlayerOrder),
     case {CurrentPlayerID =:= Player,
@@ -101,12 +102,14 @@ deal_cards({take_card, Player, Card},
                                        ,players = [NewPlayerState | OtherPlayers]
                                        ,character_deck = NewDeck},
 
-            if NextPlayer =/= FirstPlayer -> 
-                    {next_state, deal_cards, NewState};
-               true -> {next_state, deal_cards, State} %For debugging?
+            case NextPlayer =/= FirstPlayer of
+               true  -> {reply, ok, deal_cards, NewState};
+               false -> {reply, ok, play, pre_play_init(NewState)}
             end;
-
-        _ -> {next_state, deal_cards, State}
+        {true, false} ->
+            {reply, {error, no_card}, deal_cards, State};
+        {false, _} ->
+            {reply, {error, wrong_player}, deal_cards, State}
     end.
 
 pre_play_init(#game_state{players = Players} = State) ->
@@ -233,27 +236,27 @@ test() ->
     {_, _, NewState1} =
         deal_cards({take_card, 
                     get_player_id(InitState#game_state.current_player, InitState), 
-                    First},
+                    First}, lol,
                    InitState),
     {_, _, NewState2} =
         deal_cards({take_card,
                     get_player_id(NewState1#game_state.current_player, NewState1), 
-                    Second},
+                    Second}, lol,
                    NewState1),
     {_, _, NewState3} =
         deal_cards({take_card, 
                     get_player_id(NewState2#game_state.current_player, NewState2), 
-                    Third},
+                    Third},lol ,
                    NewState2),
     {_, _, NewState4} =
         deal_cards({take_card, 
                     get_player_id(NewState3#game_state.current_player, NewState3), 
-                    Fourth},
+                    Fourth},lol,
                    NewState3),
     %{_, _, NewState} =
         deal_cards({take_card, 
                     get_player_id(NewState4#game_state.current_player, NewState4), 
-                    Fifth},
+                    Fifth},lol,
                    NewState4).
 
     %NewState.
