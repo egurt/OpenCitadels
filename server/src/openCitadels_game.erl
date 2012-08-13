@@ -260,24 +260,17 @@ pre_play_init(#gs{players = Players} = State) ->
     NewState.
 
 % Initialise gamestate for dealing character cards
-pre_deal_cards(GameState) ->
-    pre_deal_cards(GameState#gs{character_order = []
-			       ,current_player = GameState#gs.first_player}, 
-		   num_players(GameState)).
-pre_deal_cards(GameState, 5) ->
-    [FaceDown , FaceUp , MaybeFaceUp | CDeck] = shuffle_deck(character_list()),
-    case FaceUp of
-        {4, king} ->
-            GameState#gs{character_deck = [FaceUp | CDeck]
-			 ,face_down = [FaceDown]
-			 ,face_up = [MaybeFaceUp]};
-        _ ->
-            GameState#gs{character_deck = [MaybeFaceUp | CDeck]
-			 ,face_down = [FaceDown]
-			 ,face_up = [FaceUp]}
-    end;
-pre_deal_cards(_, _) ->
-    {error, "No rules for this amount of players."}.
+%%! incorrect for |players| < 3
+pre_deal_cards(State) ->
+    N = length(State#gs.players),
+    [FD | Cs] = shuffle_deck(character_list()),
+    FU = lists:sublist([C || C <- Cs, C =/= {4, king}], 6 - N),
+    State#gs{ character_deck = Cs -- FU
+            , face_down = FD
+            , face_up = FU
+            , character_order = []
+            , current_player = State#gs.first_player
+            }.
 
 % Permutes a list (shuffles a deck)
 shuffle_deck(List) ->
