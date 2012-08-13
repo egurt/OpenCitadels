@@ -31,6 +31,7 @@
 
 -record(gs,
         {game_id %How a game instance is identified by the server (static)
+        ,seed
          ,server_pid %For communicating errors and the like (static)
          ,player_order = [] %The order the players go (static)
          ,current_player = 1 %The current player, relative to player_order
@@ -54,8 +55,9 @@ state(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, state).
 
 init(Data) ->
-    random:seed(erlang:now()),
     %% if no seed, default to now()
+    Seed = proplists:get_value(seed, Data, erlang:now()),
+    random:seed(Seed),
     {players, PlayerIDs} = proplists:lookup(players, Data),
     Districts = shuffle_deck(district_list()),
     {PSs, Deck} = lists:foldr(fun init_ps/2, {[], Districts}, PlayerIDs),
@@ -66,6 +68,7 @@ init(Data) ->
                , current_player = 1
                , server_pid     = proplists:get_value(server_pid, Data)
                , game_id        = proplists:get_value(game_id, Data)
+               , seed           = Seed
                },
     {ok, deal_cards, pre_deal_cards(State)}.
 
