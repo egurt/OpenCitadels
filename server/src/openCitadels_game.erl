@@ -49,7 +49,7 @@
 %% ------------------------------------------------------------------
 
 start_link(Data) ->
-    gen_fsm:start_link(?MODULE, Data, []).
+    gen_fsm:start_link(?MODULE, [{server_pid, self()} | Data], []).
 
 state(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, state).

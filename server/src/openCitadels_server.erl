@@ -98,7 +98,7 @@ handle_call({setup, PlayerIDs, Options}, _From, State) ->
         false ->
             GameID = erlang:now(),
             %% use supervisor?
-            {ok, GamePid} = ?GAME:start_link([ {id, GameID}
+            {ok, GamePid} = ?GAME:start_link([ {game_id, GameID}
                                              , {players, PlayerIDs}
                                              | Options
                                              ]),
