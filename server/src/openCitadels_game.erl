@@ -169,11 +169,12 @@ build_district({build_district, PlayerID, Card}, _From,
 	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
     PS = get_ps(PlayerID, State),
     Hand = PS#ps.hand,
+    Tab = PS#ps.districts,
     Money = PS#ps.money,
     Districts = PS#ps.districts,
     Cost = district_cost(Card),
-    case {lists:member(Card, Hand),
-	  Cost =< Money} of
+    case { lists:member(Card, Hand) andalso not lists:member(Card, Tab)
+	     , Cost =< Money} of
 	{false, _} ->
 	    {reply, {error, bad_card}, build_district, State};
 	{_, false} ->
