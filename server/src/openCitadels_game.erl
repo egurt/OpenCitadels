@@ -53,9 +53,21 @@ start_link(Data) ->
 state(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, state).
 
-init(_Data) ->
+init(Data) ->
     random:seed(erlang:now()),
-    {ok, deal_cards, init_state(_Data)}.
+    %% if no seed, default to now()
+    {players, PlayerIDs} = proplists:lookup(players, Data),
+    Districts = shuffle_deck(district_list()),
+    {PSs, Deck} = lists:foldr(fun init_ps/2, {[], Districts}, PlayerIDs),
+    State = #gs{ players        = PSs
+               , district_deck  = Deck
+               , player_order   = PlayerIDs
+               , first_player   = 1
+               , current_player = 1
+               , server_pid     = proplists:get_value(server_pid, Data)
+               , game_id        = proplists:get_value(game_id, Data)
+               },
+    {ok, deal_cards, pre_deal_cards(State)}.
 
 %% stubs
 handle_event(_Event, StateName, StateData) ->
@@ -75,7 +87,6 @@ handle_sync_event(_Event, _From, StateName, StateData) ->
 
 terminate(_Reason, _StateName, _StateData) ->
     whatever.
-
 
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
@@ -217,37 +228,10 @@ post_build(_, _, State) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-init_state(Options) ->
-    DistrictDeck = shuffle_deck(district_list()),
-    init_state(Options, #gs{district_deck = DistrictDeck}).
-init_state([], State) ->
-    pre_deal_cards(State);
-init_state([{players, Players} | Options], 
-           #gs{district_deck = DistrictDeck} = State) ->
-    {PlayerStates, DDeck} = initialise_pss(Players, DistrictDeck),
-    NewState = State#gs{players = PlayerStates
-                                ,district_deck = DDeck
-                                ,player_order = Players
-                                ,first_player = 1
-                                ,current_player = 1
-                               },
-    init_state(Options, NewState);
-init_state([{server_pid, ServerPid} | Options], State) ->
-    NewState = State#gs{server_pid = ServerPid},
-    init_state(Options, NewState);
-init_state([{game_id, GameID} | Options], State) ->
-    NewState = State#gs{game_id = GameID},
-    init_state(Options, NewState);
-init_state([_ | Options], State) ->
-    init_state(Options, State).
-
-% Makes initial states for each player
-initialise_pss([], DDeck) ->
-    {[], DDeck};
-initialise_pss([Player | Players], [D1, D2, D3, D4 | DDeck]) ->
-    {PlayerList, DistrictDeck} = initialise_pss(Players, DDeck),
-    {[#ps{player_id = Player, hand = [D1,D2,D3,D4]} |
-      PlayerList], DistrictDeck}.
+%% foldable player-state initialiser
+init_ps(PlayerID, {PSs, Deck}) ->
+    {Hand, Rest} = lists:split(4, Deck),
+    {[#ps{player_id = PlayerID, hand = Hand} | PSs], Rest}.
 
 pre_play_init(#gs{players = Players} = State) ->
     %Could possibly just sort the characters, depending on representation
