@@ -185,16 +185,27 @@ build_district({build_district, PlayerID, Card}, _From,
 	    NewState = update_ps(NewPS, State),
 	    {reply, ok, post_build, NewState}
     end;
+build_district( {end_turn, PlayerID, _}
+              , _From
+              , #gs{character_order = [{_Char, PlayerID}]} = State) ->
+    %Check for end game conditions etc.
+    {reply, ok, deal_cards, pre_deal_cards(State)};
+build_district( {end_turn, PlayerID, _}
+              , _From
+              , #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
+    {reply, ok, take_an_action, State#gs{character_order = Players}};
 build_district(_, _, State) ->
     {reply, {error, 'WRONG!'}, build_district, State}.
 
 
-post_build({end_turn, PlayerID, _}, _From,
-	       #gs{character_order = [{_Char, PlayerID}]} = State) ->
+post_build( {end_turn, PlayerID, _}
+          , _From
+          , #gs{character_order = [{_Char, PlayerID}]} = State) ->
     %Check for end game conditions etc.
     {reply, ok, deal_cards, pre_deal_cards(State)};
-post_build({end_turn, PlayerID, _}, _From,
-	       #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
+post_build( {end_turn, PlayerID, _}
+          , _From
+          , #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
     {reply, ok, take_an_action, State#gs{character_order = Players}};
 post_build(_, _, State) ->
     {reply, {error, 'WRONG!'}, post_build, State}.
