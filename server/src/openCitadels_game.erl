@@ -3,6 +3,8 @@
 
 -compile(export_all). %% Fix this later!
 
+-define(END_DSTR, 2).
+
 -export([ start_link/1
         , state/1
         , pick_character/3
@@ -140,8 +142,8 @@ deal_cards( {take_card, Player, Card}
             NewDeck = lists:delete(Card, CDeck),
             NextPlayer = (CurrentPlayer rem length(PlayerOrder)) + 1,
             NewState = State#gs{current_player = NextPlayer
-                                       ,players = [NewPlayerState | OtherPlayers]
-                                       ,character_deck = NewDeck},
+                               ,players = [NewPlayerState | OtherPlayers]
+                               ,character_deck = NewDeck},
 
             case NextPlayer =/= FirstPlayer of
                true  -> {reply, ok, deal_cards, NewState};
@@ -154,33 +156,33 @@ deal_cards( {take_card, Player, Card}
     end.
 
 take_an_action({take_an_action, PlayerID, gold}, _From, 
-	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
+              #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
     PlayerState = get_ps(PlayerID, State),
     Money = PlayerState#ps.money,
     NewState = update_ps(PlayerState#ps{money = Money + 2}, State),
     {reply, ok, build_district, NewState};
 take_an_action({take_an_action, PlayerID, cards}, _From, 
-	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
+              #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
     {reply, ok, take_an_action_2, State};
 take_an_action(_, _, State) ->
     {reply, {error, 'WRONG!'}, take_an_action, State}.
     
 
 take_an_action_2({choose_card, PlayerID, Card}, _From,
-		 #gs{character_order = [{_Char, PlayerID} | _],
-		    district_deck = [C1, C2 | Deck]} = State) ->
+                #gs{character_order = [{_Char, PlayerID} | _],
+                    district_deck = [C1, C2 | Deck]} = State) ->
     case lists:member(Card, [C1, C2]) of
-	true -> PS = get_ps(PlayerID, State),
-		NewPS = PS#ps{hand = [Card | PS#ps.hand]},
-		NewState = update_ps(NewPS, State#gs{district_deck = Deck}),
-		{reply, ok, build_district, NewState};
-	false -> {reply, {error, bad_card}, take_an_action_2, State}
+        true -> PS = get_ps(PlayerID, State),
+                NewPS = PS#ps{hand = [Card | PS#ps.hand]},
+                NewState = update_ps(NewPS, State#gs{district_deck = Deck}),
+                {reply, ok, build_district, NewState};
+        false -> {reply, {error, bad_card}, take_an_action_2, State}
     end;
 take_an_action_2(_, _, State) ->
     {reply, {error, 'WRONG!'}, take_an_action_2, State}.
 
 build_district({build_district, PlayerID, Card}, _From,
-	       #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
+               #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
     PS = get_ps(PlayerID, State),
     Hand = PS#ps.hand,
     Tab = PS#ps.districts,
@@ -188,23 +190,29 @@ build_district({build_district, PlayerID, Card}, _From,
     Districts = PS#ps.districts,
     Cost = district_cost(Card),
     case { lists:member(Card, Hand) andalso not lists:member(Card, Tab)
-	     , Cost =< Money} of
-	{false, _} ->
-	    {reply, {error, bad_card}, build_district, State};
-	{_, false} ->
-	    {reply, {error, no_money}, build_district, State};
-	{true, true} ->
-	    NewPS = PS#ps{hand = lists:delete(Card, Hand),
-			  money = Money - Cost,
-			  districts = [Card | Districts]},
-	    NewState = update_ps(NewPS, State),
-	    {reply, ok, post_build, NewState}
+             , Cost =< Money} of
+        {false, _} ->
+            {reply, {error, bad_card}, build_district, State};
+        {_, false} ->
+            {reply, {error, no_money}, build_district, State};
+        {true, true} ->
+            NewPS = PS#ps{hand = lists:delete(Card, Hand),
+                          money = Money - Cost,
+                          districts = [Card | Districts]},
+            NewState = update_ps(NewPS, State),
+            {reply, ok, post_build, NewState}
     end;
 build_district( {end_turn, PlayerID, _}
               , _From
-              , #gs{character_order = [{_Char, PlayerID}]} = State) ->
+              , #gs{character_order = [{_Char, PlayerID}],
+		    game_id = GID} = State) ->
     %Check for end game conditions etc.
-    {reply, ok, deal_cards, pre_deal_cards(State)};
+    case game_over(State) of
+        true -> openCitadels_server:send(GID, all, 
+                                         {game_over, player_points(all, State)}),
+                {reply, ok, post_game, State};
+	false -> {reply, ok, deal_cards, pre_deal_cards(State)}
+    end;
 build_district( {end_turn, PlayerID, _}
               , _From
               , #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
@@ -215,9 +223,15 @@ build_district(_, _, State) ->
 
 post_build( {end_turn, PlayerID, _}
           , _From
-          , #gs{character_order = [{_Char, PlayerID}]} = State) ->
+          , #gs{character_order = [{_Char, PlayerID}]
+                ,game_id = GID} = State) ->
     %Check for end game conditions etc.
-    {reply, ok, deal_cards, pre_deal_cards(State)};
+    case game_over(State) of
+        true -> openCitadels_server:send(GID, all, 
+                                         {game_over, player_points(all, State)}),
+                {reply, ok, post_game, State};
+        false -> {reply, ok, deal_cards, pre_deal_cards(State)}
+    end;
 post_build( {end_turn, PlayerID, _}
           , _From
           , #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
@@ -225,11 +239,30 @@ post_build( {end_turn, PlayerID, _}
 post_build(_, _, State) ->
     {reply, {error, 'WRONG!'}, post_build, State}.
 
+post_game(_, _, S) ->
+    {next_state, post_game, S}.
+
 
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+% End game test
+game_over(#gs{players = Players}) -> 
+    Dstr = lists:map(fun(PS) -> PS#ps.districts end, Players),
+    DstrNum = lists:map(fun length/1, Dstr),
+    lists:any(fun(N) -> N >= ?END_DSTR end, DstrNum).
+
+% Get player points
+player_points(#ps{districts = Dstr}) ->
+    L = lists:map(fun district_cost/1, Dstr),
+    lists:sum(L).
+player_points(all, #gs{player_order = PO} = State) ->
+    Fun = fun(PID) -> {PID, player_points(PID, State)} end,
+    lists:map(Fun, PO);
+player_points(PlayerID, GameState) ->
+    player_points(get_ps(PlayerID, GameState)).
 
 %% foldable player-state initialiser
 init_ps(PlayerID, {PSs, Deck}) ->
@@ -242,7 +275,7 @@ pre_play_init(#gs{players = Players} = State) ->
     Selected = lists:map(Fun, Players),
     %If cards can be sorted in correct order, this would not be necessary
     SelectedInOrder = 
-	lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
+        lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
     NewState = State#gs{character_order = SelectedInOrder},
     NewState.
 
@@ -281,9 +314,9 @@ get_ps(PlayerID, #gs{players = Players}) ->
 
 % Updates gamestate with the new player state
 update_ps(#ps{player_id = PlayerID} = PlayerState, 
-		    #gs{players = Players} = GameState) ->
+                    #gs{players = Players} = GameState) ->
     NewPlayers =
-	lists:keyreplace(PlayerID, #ps.player_id, Players, PlayerState),
+        lists:keyreplace(PlayerID, #ps.player_id, Players, PlayerState),
     GameState#gs{players = NewPlayers}.
 
 %% ------------------------------------------------------------------
