@@ -63,6 +63,7 @@ init(Data) ->
     Seed = proplists:get_value(seed, Data, erlang:now()),
     random:seed(Seed),
     {players, PlayerIDs} = proplists:lookup(players, Data),
+    {game_id, GameID} = proplists:lookup(game_id, Data),
     Districts = shuffle_deck(district_list()),
     {PSs, Deck} = lists:foldr(fun init_ps/2, {[], Districts}, PlayerIDs),
     State = #gs{ players        = PSs
@@ -71,7 +72,7 @@ init(Data) ->
                , first_player   = 1
                , current_player = 1
                , server_pid     = proplists:get_value(server_pid, Data)
-               , game_id        = proplists:get_value(game_id, Data)
+               , game_id        = GameID
                , seed           = Seed
                },
     {ok, pre_deal_cards(State)}.
