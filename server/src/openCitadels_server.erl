@@ -15,7 +15,7 @@
         , status/0
         , game_status/1
         , game_status/2
-        , move/4
+        , do/3
         , send/3
         ]).
 
@@ -68,8 +68,8 @@ game_status(_GameID) ->
 game_status(_GameID, _Player) ->
     ok.
 
-move(GameID, PlayerID, Move, Data) ->
-    gen_server:call(?SERVER, {move, GameID, PlayerID, Move, Data}).
+do(GameID, PlayerID, Action) ->
+    gen_server:call(?SERVER, {do, GameID, PlayerID, Action}).
 
 send(GameID, PlayerID, Message) ->
     gen_server:cast(?SERVER, {send, GameID, PlayerID, Message}).
@@ -117,9 +117,9 @@ handle_call({list_players, GameID}, _From, State) ->
     end,
     {reply, Reply, State};
 
-handle_call({move, GameID, PlayerID, Move, Data}, _From, State) ->
+handle_call({do, GameID, PlayerID, Action}, _From, State) ->
     Pid = (gamefind(GameID, State))#game.pid,
-    Reply = ?GAME:Move(Pid, PlayerID, Data),
+    Reply = ?GAME:do(Pid, PlayerID, Action),
     {reply, Reply, State};
 
 handle_call(state, _From, State) ->

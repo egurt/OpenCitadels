@@ -1,5 +1,5 @@
 -module(openCitadels_game).
--behaviour(gen_fsm).
+-behaviour(gen_server).
 
 -compile(export_all). %% Fix this later!
 
@@ -7,19 +7,15 @@
 
 -export([ start_link/1
         , state/1
-        , pick_character/3
-        , take/3
-        , choose/3
-        , build/3
-        , end_turn/3
+        , do/3
         ]).
 
 -export([ init/1
-        , handle_event/3
-        , handle_info/3
-        , handle_sync_event/4
-        , terminate/3
-        , code_change/4
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
         ]).
 
 -record(ps,
@@ -29,6 +25,7 @@
          ,hand = [] %The cards in the players hand
          ,money = 2 %The amount of money a player has
          ,effects = [] %assassinated, stolen from, other?
+         ,actions = []
         }).
 
 -record(gs,
@@ -44,17 +41,22 @@
          ,character_deck = [] %Deck of characters to select from
          ,face_down = [] %The face down characters
          ,face_up = [] %The face up characters
+         ,action_store
         }).
 
+-define(SEND, openCitadels_server:send).
 %% ------------------------------------------------------------------
 %% gen_fsm Function Definitions
 %% ------------------------------------------------------------------
 
 start_link(Data) ->
-    gen_fsm:start_link(?MODULE, [{server_pid, self()} | Data], []).
+    gen_server:start_link(?MODULE, [{server_pid, self()} | Data], []).
 
 state(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, state).
+    gen_server:call(Pid, state).
+
+do(Pid, PID, Action) ->
+    gen_server:call(Pid, {do, PID, Action}).
 
 init(Data) ->
     %% if no seed, default to now()
@@ -72,176 +74,125 @@ init(Data) ->
                , game_id        = proplists:get_value(game_id, Data)
                , seed           = Seed
                },
-    {ok, deal_cards, pre_deal_cards(State)}.
+    {ok, pre_deal_cards(State)}.
 
-%% stubs
-handle_event(_Event, StateName, StateData) ->
-    {next_state, StateName, StateData}.
-
-
-handle_info(_Info, StateName, StateData) ->
-    {next_state, StateName, StateData}.
+handle_call(state, _From, State) ->
+    {reply, State, State};
 
 
-handle_sync_event(state, _From, StateName, StateData) ->
-    {reply, {StateName, StateData}, StateName, StateData};
+handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
+    PS = get_ps(PlayerID, State),
+    case lists:member(Action, PS#ps.actions) of
+        true ->
+            #gs{ current_player = CurrentPlayer
+               , players        = Players
+               , character_deck = CDeck
+               , first_player   = FirstPlayer
+               , game_id        = GameID
+               } = State,
+            NewCDeck = CDeck -- [Card],
+            NextPlayer = (CurrentPlayer rem length(Players)) + 1,
+            Choices = [{choose, Char} || Char <- NewCDeck],
+            NextPS = lists:nth(NextPlayer, Players),
+            NewGS = update_ps(PS#ps{actions = [], current_character = Card}, State),
+            NewerGS = case NextPlayer =:= FirstPlayer of
+                true ->
+                    pre_turn(pre_play_init(NewGS));
+                false ->
+                    ?SEND(GameID, NextPS#ps.player_id, {actions, Choices}),
+                    update_ps(NextPS#ps{actions = Choices}, NewGS)
+            end,
+            {reply, ok, NewerGS#gs{character_deck = NewCDeck, current_player = NextPlayer}};
+        false ->
+            {reply, {error, bad_action}, State}
+    end;
+handle_call({do, PlayerID, {take, gold}}, _From, State) ->
+    PS = get_ps(PlayerID, State),
+    case lists:member({take, gold}, PS#ps.actions) of
+        true ->
+            Money = PS#ps.money + 2,
+            NewPS = set_actions(build, PS#ps{money = Money}),
+            NewState = update_ps(NewPS, State),
+            ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
+            {reply, ok, NewState};
+        false ->
+            {reply, {error, bad_action}, State}
+    end;
+handle_call({do, PlayerID, {take, cards}}, _From, State) ->
+    PS = get_ps(PlayerID, State),
+    case lists:member({take, cards}, PS#ps.actions) of
+        true ->
+            [C1, C2 | _] = State#gs.district_deck,
+            Actions = [{pick, C} || C <- [C1, C2]],
+            NewState = update_ps(PS#ps{actions = Actions}, State),
+            ?SEND(State#gs.game_id, PlayerID, {actions, Actions}),
+            {reply, ok, NewState#gs{action_store = PS#ps.actions}};
+        false ->
+            {reply, {error, bad_action}, State}
+    end;
+handle_call({do, PlayerID, {pick, Card} = Action}, _From, State) ->
+    PS = get_ps(PlayerID, State),
+    case lists:member(Action, PS#ps.actions) of
+        true ->
+            PS = get_ps(PlayerID, State),
+            [_C1, _C2 | NewDeck] = State#gs.district_deck,
+            NewHand = [Card | PS#ps.hand],
+            NewPS = set_actions(build, PS#ps{hand = NewHand, actions = State#gs.action_store}),
+            ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
+            {reply, ok, update_ps(NewPS, State#gs{district_deck = NewDeck})};
+        false ->
+            {reply, {error, bad_action}, State}
+    end;
+handle_call({do, PlayerID, {build, Card} = Action}, _From, State) ->
+    PS = get_ps(PlayerID, State),
+    case lists:member(Action, PS#ps.actions) of
+        true ->
+            Filter = fun ({build, _}) -> false; (_) -> true end,
+            NewPS = PS#ps{ hand      = lists:delete(Card, PS#ps.hand)
+                         , money     = PS#ps.money - district_cost(Card)
+                         , districts = [Card | PS#ps.districts]
+                         , actions   = [A || A <- PS#ps.actions, Filter(A)]
+                         },
+            ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
+            {reply, ok, update_ps(NewPS, State)};
+        false ->
+            {reply, {error, bad_action}, State}
+    end;
+handle_call({do, PlayerID, end_turn = Action}, _From, State) ->
+    PS = get_ps(PlayerID, State),
+    case lists:member(Action, PS#ps.actions) of
+        true ->
+            %Check for end round/game conditions etc.
+            case game_over(State) of
+                true ->
+                    GID = State#gs.game_id,
+                    ?SEND(GID, all, {game_over, player_points(all, State)}),
+                    {reply, ok, State};
+                false ->
+                    ?SEND(State#gs.game_id, PlayerID, {actions, []}),
+                    {reply, ok, pre_turn(update_ps(PS#ps{actions = []}, State))}
+            end;
+        false ->
+            {reply, {error, bad_action}, State}
+    end;
+handle_call(Message, _From, State) ->
+    io:format("Unmatched call: ~p\n", [Message]),
+    {reply, ok, State}.
 
-handle_sync_event(_Event, _From, StateName, StateData) ->
-    {next_state, StateName, StateData}.
+
+handle_cast(_Message, State) ->
+    {noreply, State}.
 
 
-terminate(_Reason, _StateName, _StateData) ->
+handle_info(_Message, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
     whatever.
 
 
-code_change(_OldVsn, StateName, StateData, _Extra) ->
-    {ok, StateName, StateData}.
-
-
-%% ------------------------------------------------------------------
-%% Transition Definitions
-%% ------------------------------------------------------------------
-
-% Selecting Characters
-pick_character(Pid, Player, Card) ->
-    gen_fsm:sync_send_event(Pid, {take_card, Player, Card}).
-
-% Take an action
-take(Pid, Player, Choice) ->
-    gen_fsm:sync_send_event(Pid, {take_an_action, Player, Choice}).
-
-choose(Pid, Player, Card) ->
-    gen_fsm:sync_send_event(Pid, {choose_card, Player, Card}).
-
-build(Pid, Player, District) ->
-    gen_fsm:sync_send_event(Pid, {build_district, Player, District}).
-
-end_turn(Pid, Player, _Null) ->
-    gen_fsm:sync_send_event(Pid, {end_turn, Player, _Null}).
-
-%% ------------------------------------------------------------------
-%% State Definitions
-%% ------------------------------------------------------------------
-
-deal_cards( {take_card, Player, Card}
-          , _From
-          , #gs{current_player = CurrentPlayer
-               ,players = Players
-               ,player_order = PlayerOrder
-               ,character_deck = CDeck
-               ,first_player = FirstPlayer} = State) ->
-
-    CurrentPlayerID = get_player_id(CurrentPlayer, PlayerOrder),
-    case {CurrentPlayerID =:= Player,
-          lists:member(Card, CDeck)} of
-        {true, true} -> %Correct player's turn, card is available
-            PlayerState = get_ps(CurrentPlayerID, State),
-            NewPlayerState = 
-                PlayerState#ps{current_character = Card},
-            OtherPlayers = lists:delete(PlayerState, Players),
-            NewDeck = lists:delete(Card, CDeck),
-            NextPlayer = (CurrentPlayer rem length(PlayerOrder)) + 1,
-            NewState = State#gs{current_player = NextPlayer
-                               ,players = [NewPlayerState | OtherPlayers]
-                               ,character_deck = NewDeck},
-
-            case NextPlayer =/= FirstPlayer of
-               true  -> {reply, ok, deal_cards, NewState};
-               false -> {reply, ok, take_an_action, pre_play_init(NewState)}
-            end;
-        {true, false} ->
-            {reply, {error, no_card}, deal_cards, State};
-        {false, _} ->
-            {reply, {error, wrong_player}, deal_cards, State}
-    end.
-
-take_an_action({take_an_action, PlayerID, gold}, _From, 
-              #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
-    PlayerState = get_ps(PlayerID, State),
-    Money = PlayerState#ps.money,
-    NewState = update_ps(PlayerState#ps{money = Money + 2}, State),
-    {reply, ok, build_district, NewState};
-take_an_action({take_an_action, PlayerID, cards}, _From, 
-              #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
-    {reply, ok, take_an_action_2, State};
-take_an_action(_, _, State) ->
-    {reply, {error, 'WRONG!'}, take_an_action, State}.
-    
-
-take_an_action_2({choose_card, PlayerID, Card}, _From,
-                #gs{character_order = [{_Char, PlayerID} | _],
-                    district_deck = [C1, C2 | Deck]} = State) ->
-    case lists:member(Card, [C1, C2]) of
-        true -> PS = get_ps(PlayerID, State),
-                NewPS = PS#ps{hand = [Card | PS#ps.hand]},
-                NewState = update_ps(NewPS, State#gs{district_deck = Deck}),
-                {reply, ok, build_district, NewState};
-        false -> {reply, {error, bad_card}, take_an_action_2, State}
-    end;
-take_an_action_2(_, _, State) ->
-    {reply, {error, 'WRONG!'}, take_an_action_2, State}.
-
-build_district({build_district, PlayerID, Card}, _From,
-               #gs{character_order = [{_Char, PlayerID} | _]} = State) ->
-    PS = get_ps(PlayerID, State),
-    Hand = PS#ps.hand,
-    Tab = PS#ps.districts,
-    Money = PS#ps.money,
-    Districts = PS#ps.districts,
-    Cost = district_cost(Card),
-    case { lists:member(Card, Hand) andalso not lists:member(Card, Tab)
-             , Cost =< Money} of
-        {false, _} ->
-            {reply, {error, bad_card}, build_district, State};
-        {_, false} ->
-            {reply, {error, no_money}, build_district, State};
-        {true, true} ->
-            NewPS = PS#ps{hand = lists:delete(Card, Hand),
-                          money = Money - Cost,
-                          districts = [Card | Districts]},
-            NewState = update_ps(NewPS, State),
-            {reply, ok, post_build, NewState}
-    end;
-build_district( {end_turn, PlayerID, _}
-              , _From
-              , #gs{character_order = [{_Char, PlayerID}],
-		    game_id = GID} = State) ->
-    %Check for end game conditions etc.
-    case game_over(State) of
-        true -> openCitadels_server:send(GID, all, 
-                                         {game_over, player_points(all, State)}),
-                {reply, ok, post_game, State};
-	false -> {reply, ok, deal_cards, pre_deal_cards(State)}
-    end;
-build_district( {end_turn, PlayerID, _}
-              , _From
-              , #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
-    {reply, ok, take_an_action, State#gs{character_order = Players}};
-build_district(_, _, State) ->
-    {reply, {error, 'WRONG!'}, build_district, State}.
-
-
-post_build( {end_turn, PlayerID, _}
-          , _From
-          , #gs{character_order = [{_Char, PlayerID}]
-                ,game_id = GID} = State) ->
-    %Check for end game conditions etc.
-    case game_over(State) of
-        true -> openCitadels_server:send(GID, all, 
-                                         {game_over, player_points(all, State)}),
-                {reply, ok, post_game, State};
-        false -> {reply, ok, deal_cards, pre_deal_cards(State)}
-    end;
-post_build( {end_turn, PlayerID, _}
-          , _From
-          , #gs{character_order = [{_Char, PlayerID} | Players]} = State) ->
-    {reply, ok, take_an_action, State#gs{character_order = Players}};
-post_build(_, _, State) ->
-    {reply, {error, 'WRONG!'}, post_build, State}.
-
-post_game(_, _, S) ->
-    {next_state, post_game, S}.
-
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
 
 %% ------------------------------------------------------------------
@@ -264,6 +215,29 @@ player_points(all, #gs{player_order = PO} = State) ->
 player_points(PlayerID, GameState) ->
     player_points(get_ps(PlayerID, GameState)).
 
+
+pre_turn(#gs{ character_order = [{_Char, PlayerID} | _]
+            , players = Players
+            } = State) ->
+    PS = lists:keyfind(PlayerID, #ps.player_id, Players),
+    NewPS = set_actions(start, PS),
+    ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
+    update_ps(NewPS, State).
+
+
+set_actions(start, #ps{current_character = _Char} = PS) ->
+    PS#ps{actions = [{take, gold}, {take, cards}]};
+set_actions(build, #ps{ current_character = _Char
+                      , districts         = Tab
+                      , hand              = Hand
+                      , money             = Money
+                      } = PS) ->
+    Filter = fun ({Type, _}) -> Type =/= take end,
+    Actions = lists:filter(Filter, PS#ps.actions),
+    Build = [{build, Card} || Card <- Hand -- Tab, district_cost(Card) =< Money],
+    PS#ps{actions = Actions ++ [end_turn | Build]}.
+
+
 %% foldable player-state initialiser
 init_ps(PlayerID, {PSs, Deck}) ->
     {Hand, Rest} = lists:split(4, Deck),
@@ -281,16 +255,21 @@ pre_play_init(#gs{players = Players} = State) ->
 
 % Initialise gamestate for dealing character cards
 %%! incorrect for |players| < 3
-pre_deal_cards(State) ->
-    N = length(State#gs.players),
+pre_deal_cards(#gs{players = Players} = State) ->
+    N = length(Players),
     [FD | Cs] = shuffle_deck(character_list()),
     FU = lists:sublist([C || C <- Cs, C =/= {4, king}], 6 - N),
-    State#gs{ character_deck = Cs -- FU
-            , face_down = FD
-            , face_up = FU
-            , character_order = []
-            , current_player = State#gs.first_player
-            }.
+    Choices = [{choose, Char} || Char <- Cs -- FU],
+    FPS = lists:nth(State#gs.first_player, Players),
+    ?SEND(State#gs.game_id, FPS#ps.player_id, {actions, Choices}),
+    update_ps( FPS#ps{actions = Choices}
+             , State#gs{ character_deck = Cs -- FU
+                       , face_down = FD
+                       , face_up = FU
+                       , character_order = []
+                       , current_player = State#gs.first_player
+                       }
+             ).
 
 % Permutes a list (shuffles a deck)
 shuffle_deck(List) ->
@@ -318,10 +297,6 @@ update_ps(#ps{player_id = PlayerID} = PlayerState,
     NewPlayers =
         lists:keyreplace(PlayerID, #ps.player_id, Players, PlayerState),
     GameState#gs{players = NewPlayers}.
-
-%% ------------------------------------------------------------------
-%% Test Functions
-%% ------------------------------------------------------------------
 
 % Sort characters function
 character_order(C1, C2) ->
