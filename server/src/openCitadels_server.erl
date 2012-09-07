@@ -177,3 +177,11 @@ sendplayers(PlayerIDs, Message, State) ->
         Pid ! Message
     end,
     lists:foreach(Fun, PlayerIDs).
+
+r() ->
+    receive
+	Action ->
+	    Action
+    after 1000 ->
+	    no
+    end.

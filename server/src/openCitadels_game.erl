@@ -80,7 +80,7 @@ init(Data) ->
 handle_call(state, _From, State) ->
     {reply, State, State};
 
-
+% select a character
 handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
@@ -107,6 +107,7 @@ handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
         false ->
             {reply, {error, bad_action}, State}
     end;
+% take an action (take gold)
 handle_call({do, PlayerID, {take, gold}}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member({take, gold}, PS#ps.actions) of
@@ -119,6 +120,7 @@ handle_call({do, PlayerID, {take, gold}}, _From, State) ->
         false ->
             {reply, {error, bad_action}, State}
     end;
+% take an action (take cards, choose 1 of 2)
 handle_call({do, PlayerID, {take, cards}}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member({take, cards}, PS#ps.actions) of
@@ -131,6 +133,7 @@ handle_call({do, PlayerID, {take, cards}}, _From, State) ->
         false ->
             {reply, {error, bad_action}, State}
     end;
+% choose which card to keep during take an action (take card)
 handle_call({do, PlayerID, {pick, Card} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
@@ -144,6 +147,7 @@ handle_call({do, PlayerID, {pick, Card} = Action}, _From, State) ->
         false ->
             {reply, {error, bad_action}, State}
     end;
+% build district
 handle_call({do, PlayerID, {build, Card} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
@@ -159,18 +163,20 @@ handle_call({do, PlayerID, {build, Card} = Action}, _From, State) ->
         false ->
             {reply, {error, bad_action}, State}
     end;
+% end turn
 handle_call({do, PlayerID, end_turn = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
         true ->
+	    GID = State#gs.game_id,
             %Check for end round/game conditions etc.
+	    %Should only be done when the last character has done his thing?
             case game_over(State) of
                 true ->
-                    GID = State#gs.game_id,
                     ?SEND(GID, all, {game_over, player_points(all, State)}),
                     {reply, ok, State};
                 false ->
-                    ?SEND(State#gs.game_id, PlayerID, {actions, []}),
+                    ?SEND(GID, PlayerID, {actions, []}),
                     {reply, ok, pre_turn(update_ps(PS#ps{actions = []}, State))}
             end;
         false ->
@@ -217,13 +223,15 @@ player_points(PlayerID, GameState) ->
     player_points(get_ps(PlayerID, GameState)).
 
 
-pre_turn(#gs{ character_order = [{_Char, PlayerID} | _]
+pre_turn(#gs{ character_order = [ {_Char, PlayerID} | CO ]
             , players = Players
             } = State) ->
     PS = lists:keyfind(PlayerID, #ps.player_id, Players),
     NewPS = set_actions(start, PS),
     ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
-    update_ps(NewPS, State).
+    update_ps(NewPS, State#gs{ character_order = CO });
+pre_turn(State) ->
+    pre_deal_cards(State).
 
 
 set_actions(start, #ps{current_character = _Char} = PS) ->
