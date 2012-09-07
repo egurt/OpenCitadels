@@ -1,0 +1,12 @@
+{application, openCitadels_client,
+ [
+  {description, "OpenCitadels client"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  openCitadels_server,
+                  kernel,
+                  stdlib
+                 ]},
+  {env, []}
+ ]}.
