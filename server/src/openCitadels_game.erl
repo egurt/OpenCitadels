@@ -127,9 +127,9 @@ handle_call({do, PlayerID, {take, cards}}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member({take, cards}, PS#ps.actions) of
         true ->
-            [C1, C2 | _] = State#gs.district_deck,
-            Actions = [{pick, C} || C <- [C1, C2]],
-            NewState = update_ps(PS#ps{actions = Actions}, State),
+            {Cards, GS} = draw_cards(2, State),
+            Actions = [{pick, C} || C <- Cards],
+            NewState = update_ps(PS#ps{actions = Actions}, GS),
             ?SEND(State#gs.game_id, PlayerID, {actions, Actions}),
             {reply, ok, NewState#gs{action_store = PS#ps.actions}};
         false ->
@@ -140,12 +140,12 @@ handle_call({do, PlayerID, {pick, Card} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
         true ->
-            PS = get_ps(PlayerID, State),
-            [_C1, _C2 | NewDeck] = State#gs.district_deck,
+            [Diss] = [C || {A, C} <- PS#ps.actions, A =:= pick, C =/= Card],
             NewHand = [Card | PS#ps.hand],
             NewPS = set_actions(build, PS#ps{hand = NewHand, actions = State#gs.action_store}),
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
-            {reply, ok, update_ps(NewPS, State#gs{district_deck = NewDeck})};
+            NewGS = State#gs{discard_pile = [Diss | State#gs.discard_pile]},
+            {reply, ok, update_ps(NewPS, NewGS)};
         false ->
             {reply, {error, bad_action}, State}
     end;
