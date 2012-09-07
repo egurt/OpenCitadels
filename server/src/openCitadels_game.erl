@@ -38,6 +38,7 @@
          ,players = [] %List of player states
          ,first_player = 1 %First player (is changed after a round)
          ,district_deck = [] %Deck of districts
+         ,discard_pile = []
          ,character_deck = [] %Deck of characters to select from
          ,face_down = [] %The face down characters
          ,face_up = [] %The face up characters
@@ -77,9 +78,10 @@ init(Data) ->
                },
     {ok, pre_deal_cards(State)}.
 
+
+% dump state (for debugging)
 handle_call(state, _From, State) ->
     {reply, State, State};
-
 % select a character
 handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
@@ -286,6 +288,18 @@ shuffle_deck(List) ->
     SortedModList = lists:sort(ModList),
     lists:map(fun({_, E}) -> E end, SortedModList).
 
+draw_cards(N, GS) when N >= 0 ->
+    Fun = fun (_I, {Cards, InterGS}) ->
+        {Card, NewGS} = draw_card(InterGS),
+        {[Card | Cards], NewGS}
+    end,
+    lists:foldl(Fun, {[], GS}, lists:seq(1, N)).
+    
+draw_card(#gs{district_deck = [], discard_pile = Disc} = GS) ->
+    draw_card(GS#gs{district_deck = shuffle_deck(Disc), discard_pile = []});
+draw_card(#gs{district_deck = [Card | Rest]} = GS) ->
+    {Card, GS#gs{district_deck = Rest}}.
+    
 % Number of players in game
 num_players(#gs{player_order = PlayerOrder}) ->
     length(PlayerOrder).
