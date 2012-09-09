@@ -100,12 +100,13 @@ handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
             NewGS = update_ps(PS#ps{actions = [], current_character = Card}, State),
             NewerGS = case NextPlayer =:= FirstPlayer of
                 true ->
-                    pre_turn(pre_play_init(NewGS));
+                    pre_turn(pre_play_init(NewGS#gs{ character_deck = []
+                                                   , face_down = NewCDeck ++ NewGS#gs.face_down}));
                 false ->
                     ?SEND(GameID, NextPS#ps.player_id, {actions, Choices}),
-                    update_ps(NextPS#ps{actions = Choices}, NewGS)
+                    update_ps(NextPS#ps{actions = Choices}, NewGS#gs{character_deck = NewCDeck})
             end,
-            {reply, ok, NewerGS#gs{character_deck = NewCDeck, current_player = NextPlayer}};
+            {reply, ok, NewerGS#gs{current_player = NextPlayer}};
         false ->
             {reply, {error, bad_action}, State}
     end;
@@ -275,7 +276,7 @@ pre_deal_cards(#gs{players = Players} = State) ->
     ?SEND(State#gs.game_id, FPS#ps.player_id, {actions, Choices}),
     update_ps( FPS#ps{actions = Choices}
              , State#gs{ character_deck = Cs -- FU
-                       , face_down = FD
+                       , face_down = [FD]
                        , face_up = FU
                        , character_order = []
                        , current_player = State#gs.first_player
