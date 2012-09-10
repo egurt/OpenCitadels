@@ -58,6 +58,9 @@ state(Pid) ->
 do(Pid, PID, Action) ->
     gen_server:call(Pid, {do, PID, Action}).
 
+status(Pid) ->
+    gen_server:call(Pid, status).
+
 init(Data) ->
     %% if no seed, default to now()
     Seed = proplists:get_value(seed, Data, erlang:now()),
@@ -79,6 +82,24 @@ init(Data) ->
 
 handle_call(state, _From, State) ->
     {reply, State, State};
+
+handle_call(status, _From, #gs{players = Players} = State) ->
+    L = lists:flatten (
+	[ [ {player, P}
+	  , {money, M}
+	  , {districts, D}
+	  , {hand, H}
+	  , {actions, A}
+	  ]
+	  ||
+            #ps{ player_id = P
+               , money     = M
+               , districts = D
+               , hand      = H
+	       , actions   = A
+	       } <- Players
+	]),
+    {reply, L, State};
 
 % select a character
 handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->

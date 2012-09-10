@@ -13,7 +13,7 @@
 %% ------------------------------------------------------------------
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+         terminate/2, code_change/3, status/0]).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -33,6 +33,11 @@ do(GID, N) ->
     gen_server:call(?SERVER, {do, GID, N}).
 do(N) ->
     gen_server:call(?SERVER, {do, N}).
+
+status() ->
+    gen_server:call(?SERVER, status).
+
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -41,6 +46,10 @@ init(no_args) ->
     {ok, ID} = openCitadels_server:register(),
     {ok, GID} = openCitadels_server:setup([ID], []),
     {ok, #state{id = ID, games = [#game{id = GID}]}}.
+
+handle_call(status, _From, #state{games = [Game]} = State) ->
+    Reply = openCitadels_server:game_status(Game#game.id),
+    {reply, Reply, State};
 
 handle_call({do, N}, _From, #state{games = [Game]} = State) ->
     Action = lists:nth(N, Game#game.actions),

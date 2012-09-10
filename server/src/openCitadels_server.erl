@@ -62,8 +62,8 @@ state() ->
 status() ->
     ok.
 
-game_status(_GameID) ->
-    ok.
+game_status(GameID) ->
+    gen_server:call(?SERVER, {status, GameID}).
 
 game_status(_GameID, _Player) ->
     ok.
@@ -109,6 +109,14 @@ handle_call({setup, PlayerIDs, Options}, _From, State) ->
             Games = [NewGame | State#state.games],
             {reply, {ok, GameID}, State#state{games = Games}}
     end;
+
+handle_call({status, GameID}, _From, State) ->
+    Reply = 
+        case gamefind(GameID, State) of
+            false -> {error, 'wrong id'};
+            Game  -> ?GAME:status(Game#game.pid)
+        end,
+    {reply, Reply, State};
 
 handle_call({list_players, GameID}, _From, State) ->
     Reply = case gamefind(GameID, State) of
@@ -177,11 +185,3 @@ sendplayers(PlayerIDs, Message, State) ->
         Pid ! Message
     end,
     lists:foreach(Fun, PlayerIDs).
-
-r() ->
-    receive
-	Action ->
-	    Action
-    after 1000 ->
-	    no
-    end.
