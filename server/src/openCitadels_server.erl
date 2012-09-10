@@ -119,10 +119,11 @@ handle_call({status, GameID}, _From, State) ->
     {reply, Reply, State};
 
 handle_call({list_players, GameID}, _From, State) ->
-    Reply = case gamefind(GameID, State) of
-        false -> {error, 'wrong id'};
-        Game  -> {ok, Game#game.players}
-    end,
+    Reply = 
+        case gamefind(GameID, State) of
+            false -> {error, 'wrong id'};
+            Game  -> {ok, Game#game.players}
+        end,
     {reply, Reply, State};
 
 handle_call({do, GameID, PlayerID, Action}, _From, State) ->

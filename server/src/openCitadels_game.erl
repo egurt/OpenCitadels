@@ -3,7 +3,17 @@
 
 -compile(export_all). %% Fix this later!
 
--define(END_DSTR, 2).
+-define(END_DSTR, 8).
+
+-define(ASSASSIN, {1, assassin}).
+-define(THIEF, {2, thief}).
+-define(MAGICIAN, {3, magician}).
+-define(KING, {4, king}).
+-define(BISHOP, {5, bishop}).
+-define(MERCHANT, {6, merchant}).
+-define(ARCHITECT, {7, architect}).
+-define(WARLORD, {8, warlord}).
+
 
 -export([ start_link/1
         , state/1
@@ -19,13 +29,14 @@
         ]).
 
 -record(ps,
-        {player_id %The identifier of the current player
-         ,current_character = none %The character this player is
-         ,districts = [] %The districts the player has built
-         ,hand = [] %The cards in the players hand
-         ,money = 2 %The amount of money a player has
-         ,effects = [] %assassinated, stolen from, other?
-         ,actions = []
+        { player_id %The identifier of the current player
+        , current_character = none %The character this player is
+        , districts = [] %The districts the player has built
+        , hand = [] %The cards in the players hand
+        , money = 2 %The amount of money a player has
+        , effects = [] %assassinated, stolen from, character abilities
+        , actions = []
+        , has_built = false
         }).
 
 -record(gs,
@@ -129,9 +140,9 @@ handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
             {reply, {error, bad_action}, State}
     end;
 % take an action (take gold)
-handle_call({do, PlayerID, {take, gold}}, _From, State) ->
+handle_call({do, PlayerID, {take, gold} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
-    case lists:member({take, gold}, PS#ps.actions) of
+    case lists:member(Action, PS#ps.actions) of
         true ->
             Money = PS#ps.money + 2,
             NewPS = set_actions(build, PS#ps{money = Money}),
@@ -162,7 +173,8 @@ handle_call({do, PlayerID, {pick, Card} = Action}, _From, State) ->
             PS = get_ps(PlayerID, State),
             [_C1, _C2 | NewDeck] = State#gs.district_deck,
             NewHand = [Card | PS#ps.hand],
-            NewPS = set_actions(build, PS#ps{hand = NewHand, actions = State#gs.action_store}),
+            NewPS = set_actions(build, PS#ps{ hand = NewHand
+                                            , actions = State#gs.action_store}),
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, update_ps(NewPS, State#gs{district_deck = NewDeck})};
         false ->
@@ -178,6 +190,7 @@ handle_call({do, PlayerID, {build, Card} = Action}, _From, State) ->
                          , money     = PS#ps.money - district_cost(Card)
                          , districts = [Card | PS#ps.districts]
                          , actions   = [A || A <- PS#ps.actions, Filter(A)]
+                         , has_built = true
                          },
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, update_ps(NewPS, State)};
@@ -277,7 +290,6 @@ pre_play_init(#gs{players = Players} = State) ->
     %Could possibly just sort the characters, depending on representation
     Fun = fun(#ps{current_character = C, player_id = P}) -> {C, P} end,
     Selected = lists:map(Fun, Players),
-    %If cards can be sorted in correct order, this would not be necessary
     SelectedInOrder = 
         lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
     NewState = State#gs{character_order = SelectedInOrder},
@@ -288,7 +300,7 @@ pre_play_init(#gs{players = Players} = State) ->
 pre_deal_cards(#gs{players = Players} = State) ->
     N = length(Players),
     [FD | Cs] = shuffle_deck(character_list()),
-    FU = lists:sublist([C || C <- Cs, C =/= {4, king}], 6 - N),
+    FU = lists:sublist([C || C <- Cs, C =/= ?KING], 6 - N),
     Choices = [{choose, Char} || Char <- Cs -- FU],
     FPS = lists:nth(State#gs.first_player, Players),
     ?SEND(State#gs.game_id, FPS#ps.player_id, {actions, Choices}),
@@ -301,7 +313,7 @@ pre_deal_cards(#gs{players = Players} = State) ->
                        }
              ).
 
-% Permutes a list (shuffles a deck)
+% Randomly permutes a list (shuffles a deck)
 shuffle_deck(List) ->
     ModList = lists:map(fun(E) -> {random:uniform(), E} end, List),
     SortedModList = lists:sort(ModList),
@@ -334,14 +346,15 @@ character_order(C1, C2) ->
 
 % Get list of characters in the game
 character_list() ->
-    [{1, assassin}
-     ,{2, thief}
-     ,{3, magician}
-     ,{4, king}
-     ,{5, bishop}
-     ,{6, merchant}
-     ,{7, architect}
-     ,{8, warlord}].
+    [ ?ASSASSIN
+    , ?THIEF
+    , ?MAGICIAN
+    , ?KING
+    , ?BISHOP
+    , ?MERCHANT
+    , ?ARCHITECT
+    , ?WARLORD
+    ].
 
 % Get district cost
 district_cost({C, _}) ->
