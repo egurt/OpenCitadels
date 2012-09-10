@@ -53,6 +53,7 @@
         , face_down = [] %The face down characters
         , face_up = [] %The face up characters
         , action_store
+        , discard_pile = []
         }).
 
 %special effects (both for districts and characters)
