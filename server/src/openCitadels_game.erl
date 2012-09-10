@@ -104,20 +104,20 @@ handle_call(state, _From, State) ->
 
 handle_call(status, _From, #gs{players = Players} = State) ->
     L = lists:flatten (
-	[ [ {player, P}
-	  , {money, M}
-	  , {districts, D}
-	  , {hand, H}
-	  , {actions, A}
-	  ]
-	  ||
+        [ [ {player, P}
+          , {money, M}
+          , {districts, D}
+          , {hand, H}
+          , {actions, A}
+          ]
+          ||
             #ps{ player_id = P
                , money     = M
                , districts = D
                , hand      = H
-	       , actions   = A
-	       } <- Players
-	]),
+               , actions   = A
+               } <- Players
+        ]),
     {reply, L, State};
 
 % select a character
@@ -138,7 +138,7 @@ handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
             NewPS = PS#ps{ actions = []
                          , current_character = Card
                          },
-            NewGS = 
+            NewGS =
                 update_ps(NewPS, State),
             NewerGS = case NextPlayer =:= FirstPlayer of
                 true ->
@@ -223,8 +223,8 @@ handle_call({do, PlayerID, end_turn = Action}, _From, State) ->
                     {reply, ok, State};
                 false ->
                     ?SEND(GID, PlayerID, {actions, []}),
-                    {reply, ok, pre_turn(update_ps(PS#ps{actions = [], 
-                                                         has_built = false}, 
+                    {reply, ok, pre_turn(update_ps(PS#ps{actions = [],
+                                                         has_built = false},
                                                    State))}
             end;
         false ->
@@ -237,8 +237,8 @@ handle_call({do, PlayerID, {assassinate, Target} = Action}, _From, State) ->
     case lists:member(Action, PS#ps.actions) of
         true ->
             #gs{players = Players} = State,
-            Filter = fun(#spc{name = {assassinate, _}}) -> false; 
-                        ({assassinate, _}) -> false; 
+            Filter = fun(#spc{name = {assassinate, _}}) -> false;
+                        ({assassinate, _}) -> false;
                         (_) -> true end,
             Eff = lists:filter(Filter, PS#ps.effects),
             Act = lists:filter(Filter, PS#ps.actions),
@@ -248,7 +248,7 @@ handle_call({do, PlayerID, {assassinate, Target} = Action}, _From, State) ->
             case lists:keyfind(Target, #ps.current_character, Players) of
                 false ->
                     NewState = update_ps(NewPS, State);
-                TarPS -> 
+                TarPS ->
                     TarEff = TarPS#ps.effects,
                     Ass = #spc{ prio = 1
                               , state = start
@@ -270,7 +270,7 @@ handle_call({do, PlayerID, {steal_from, Target} = Action}, _From, State) ->
     case lists:member(Action, PS#ps.actions) of
         true ->
             #gs{players = Players} = State,
-            Filter = fun(#spc{name = {steal_from, _}}) -> false; 
+            Filter = fun(#spc{name = {steal_from, _}}) -> false;
                         ({steal_from, _}) -> false;
                         (_) -> true end,
             Eff = lists:filter(Filter, PS#ps.effects),
@@ -281,7 +281,7 @@ handle_call({do, PlayerID, {steal_from, Target} = Action}, _From, State) ->
             case lists:keyfind(Target, #ps.current_character, Players) of
                 false ->
                     NewState = update_ps(NewPS, State);
-                TarPS -> 
+                TarPS ->
                     TarEff = TarPS#ps.effects,
                     Stl = #spc{ prio = 2
                               , state = start
@@ -366,11 +366,11 @@ handle_call({do, PlayerID, take_one_gold = Action}, _From, State) ->
     case lists:member(Action, PS#ps.actions) of
         true ->
             Eff = lists:keydelete(Action, #spc.name, PS#ps.effects),
-	    Gold = PS#ps.money + 1,
-            NewPS = set_actions(build, 
-				PS#ps{ effects = Eff
-				     , money = Gold
-				     }),
+            Gold = PS#ps.money + 1,
+            NewPS = set_actions(build,
+                                PS#ps{ effects = Eff
+                                     , money = Gold
+                                     }),
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, update_ps(NewPS, State)};
         false ->
@@ -383,11 +383,11 @@ handle_call({do, PlayerID, take_two_cards = Action}, _From, State) ->
     case lists:member(Action, PS#ps.actions) of
         true ->
             Eff = lists:keydelete(Action, #spc.name, PS#ps.effects),
-	    [ C1, C2 | Dstr ] = State#gs.district_deck,
-            NewPS = set_actions(build, 
-				PS#ps{ effects = Eff
-				     , hand = [ C1, C2 | PS#ps.hand ]
-				     }),
+            [ C1, C2 | Dstr ] = State#gs.district_deck,
+            NewPS = set_actions(build,
+                                PS#ps{ effects = Eff
+                                     , hand = [ C1, C2 | PS#ps.hand ]
+                                     }),
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, update_ps(NewPS, State#gs{district_deck = Dstr})};
         false ->
@@ -400,23 +400,23 @@ handle_call({do, PlayerID, destroy_district = Action}, _From, State) ->
     case lists:member(Action, PS#ps.actions) of
         true ->
             Eff = lists:keydelete(Action, #spc.name, PS#ps.effects),
-	    Store = lists:delete(Action, PS#ps.actions),
-	    Foldr = fun(#spc{name = {immune_to_warlord, Char}}, L) -> [ Char | L ];
-		       (_, L) -> L
-		    end,
-	    Immune = lists:foldr(Foldr, [], PS#ps.effects),
-	    Act = 
-		[cancel | [ {destroy, D, P}
-		|| PSS <- State#gs.players
-		,  not(lists:member(PSS#ps.current_character, Immune))
-		,  P = PSS#ps.player_id
-		,  D <- PSS#ps.districts
-		,  district_cost(D) =< PS#ps.money + 1
-		]],
-            NewPS = 
-		PS#ps{ effects = Eff
-		     , actions = Act
-		     },
+            Store = lists:delete(Action, PS#ps.actions),
+            Foldr = fun(#spc{name = {immune_to_warlord, Char}}, L) -> [ Char | L ];
+                       (_, L) -> L
+                    end,
+            Immune = lists:foldr(Foldr, [], PS#ps.effects),
+            Act =
+                [cancel | [ {destroy, D, P}
+                || PSS <- State#gs.players
+                ,  not(lists:member(PSS#ps.current_character, Immune))
+                ,  P = PSS#ps.player_id
+                ,  D <- PSS#ps.districts
+                ,  district_cost(D) =< PS#ps.money + 1
+                ]],
+            NewPS =
+                PS#ps{ effects = Eff
+                     , actions = Act
+                     },
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, update_ps(NewPS, State#gs{action_store = Store})};
         false ->
@@ -427,15 +427,15 @@ handle_call({do, PlayerID, {destroy, D, P} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
         true ->
-	    TargetPS = get_ps(P, State),
-	    TargetDS = lists:delete(D, TargetPS#ps.districts),
-	    Store = State#gs.action_store,
-	    NewMoney = PS#ps.money - district_cost(D) + 1,
-	    NewPS = PS#ps{ money = NewMoney
-			 , actions = Store
-			 },
-	    NewState = update_ps(TargetPS#ps{districts = TargetDS},
-				 update_ps(NewPS, State)),
+            TargetPS = get_ps(P, State),
+            TargetDS = lists:delete(D, TargetPS#ps.districts),
+            Store = State#gs.action_store,
+            NewMoney = PS#ps.money - district_cost(D) + 1,
+            NewPS = PS#ps{ money = NewMoney
+                         , actions = Store
+                         },
+            NewState = update_ps(TargetPS#ps{districts = TargetDS},
+                                 update_ps(NewPS, State)),
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, NewState};
         false ->
@@ -446,7 +446,7 @@ handle_call({do, PlayerID, cancel = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
         true ->
-	    NewPS = PS#ps{actions = State#gs.action_store},
+            NewPS = PS#ps{actions = State#gs.action_store},
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
             {reply, ok, update_ps(NewPS, State)};
         false ->
@@ -478,7 +478,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% ------------------------------------------------------------------
 
 % End game test
-game_over(#gs{players = Players}) -> 
+game_over(#gs{players = Players}) ->
     Dstr = lists:map(fun(PS) -> PS#ps.districts end, Players),
     DstrNum = lists:map(fun length/1, Dstr),
     lists:any(fun(N) -> N >= ?END_DSTR end, DstrNum).
@@ -563,11 +563,11 @@ char_abilities(?WARLORD) ->
           , name = {take_gold, red}
           }
     , #spc{ state = all
-	  , name = {immun_to_warlord, ?WARLORD}
-	  }
+          , name = {immun_to_warlord, ?WARLORD}
+          }
     , #spc{ state = all
-	  , name = {immun_to_warlord, ?BISHOP}
-	  }
+          , name = {immun_to_warlord, ?BISHOP}
+          }
     ];
 char_abilities(_) ->
     [].
@@ -578,7 +578,7 @@ dstr_abilities(_) ->
 %make player (and district) special abilities enter the effect list for all players
 % call after all characters have been selected but before an actual turn starts
 init_player_effects(#gs{players = Players} = GS) ->
-    Upd = 
+    Upd =
         fun (#ps{current_character = Char} = PS, G) ->
                 Chr = char_abilities(Char),
                 Dst = dstr_abilities(void),
@@ -593,9 +593,9 @@ set_actions(start, #ps{effects = Eff} = PS) ->
     Start = lists:filter(FltStart, Eff),
     Instant = lists:sort(lists:filter(FltInst, Start)),
     case Instant of
-        [I | _] -> 
+        [I | _] ->
             PS#ps{actions = [Map(I)]};
-        [] -> 
+        [] ->
             NewStart = lists:map(Map, Start),
             PS#ps{actions = [{take, gold}, {take, cards} | NewStart]}
     end;
@@ -615,7 +615,7 @@ set_actions(build, #ps{ districts         = Tab
             PS#ps{actions = [Map(I)]};
         [] ->
             NewBuild = lists:map(Map, Bld),
-            Build = [{build, Card} || Card <- Hand -- Tab, 
+            Build = [{build, Card} || Card <- Hand -- Tab,
                                       district_cost(Card) =< Money],
             PS#ps{actions = [end_turn | NewBuild ++ Build]}
     end.
@@ -631,7 +631,7 @@ pre_play_init(#gs{players = Players} = State) ->
     %Could possibly just sort the characters, depending on representation
     Fun = fun(#ps{current_character = C, player_id = P}) -> {C, P} end,
     Selected = lists:map(Fun, Players),
-    SelectedInOrder = 
+    SelectedInOrder =
         lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
     NewState = State#gs{character_order = SelectedInOrder},
     init_player_effects(NewState).
@@ -675,7 +675,7 @@ get_ps(PlayerID, #gs{players = Players}) ->
     lists:keyfind(PlayerID, #ps.player_id, Players).
 
 % Updates gamestate with the new player state
-update_ps(#ps{player_id = PlayerID} = PlayerState, 
+update_ps(#ps{player_id = PlayerID} = PlayerState,
                     #gs{players = Players} = GameState) ->
     NewPlayers =
         lists:keyreplace(PlayerID, #ps.player_id, Players, PlayerState),
