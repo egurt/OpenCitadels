@@ -99,6 +99,8 @@ init(Data) ->
                },
     {ok, pre_deal_cards(State)}.
 
+
+% dump state (for debugging)
 handle_call(state, _From, State) ->
     {reply, State, State};
 
@@ -142,12 +144,13 @@ handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
                 update_ps(NewPS, State),
             NewerGS = case NextPlayer =:= FirstPlayer of
                 true ->
-                    pre_turn(pre_play_init(NewGS));
+                    pre_turn(pre_play_init(NewGS#gs{ character_deck = []
+                                                   , face_down = NewCDeck ++ NewGS#gs.face_down}));
                 false ->
                     ?SEND(GameID, NextPS#ps.player_id, {actions, Choices}),
-                    update_ps(NextPS#ps{actions = Choices}, NewGS)
+                    update_ps(NextPS#ps{actions = Choices}, NewGS#gs{character_deck = NewCDeck})
             end,
-            {reply, ok, NewerGS#gs{character_deck = NewCDeck, current_player = NextPlayer}};
+            {reply, ok, NewerGS#gs{current_player = NextPlayer}};
         false ->
             {reply, {error, bad_action}, State}
     end;
@@ -169,9 +172,9 @@ handle_call({do, PlayerID, {take, cards}}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member({take, cards}, PS#ps.actions) of
         true ->
-            [C1, C2 | _] = State#gs.district_deck,
-            Actions = [{pick, C} || C <- [C1, C2]],
-            NewState = update_ps(PS#ps{actions = Actions}, State),
+            {Cards, GS} = draw_cards(2, State),
+            Actions = [{pick, C} || C <- Cards],
+            NewState = update_ps(PS#ps{actions = Actions}, GS),
             ?SEND(State#gs.game_id, PlayerID, {actions, Actions}),
             {reply, ok, NewState#gs{action_store = PS#ps.actions}};
         false ->
@@ -182,13 +185,13 @@ handle_call({do, PlayerID, {pick, Card} = Action}, _From, State) ->
     PS = get_ps(PlayerID, State),
     case lists:member(Action, PS#ps.actions) of
         true ->
-            PS = get_ps(PlayerID, State),
-            [_C1, _C2 | NewDeck] = State#gs.district_deck,
+            [Diss] = [C || {A, C} <- PS#ps.actions, A =:= pick, C =/= Card],
             NewHand = [Card | PS#ps.hand],
             NewPS = set_actions(build, PS#ps{ hand = NewHand
                                             , actions = State#gs.action_store}),
             ?SEND(State#gs.game_id, PlayerID, {actions, NewPS#ps.actions}),
-            {reply, ok, update_ps(NewPS, State#gs{district_deck = NewDeck})};
+            NewGS = State#gs{discard_pile = [Diss | State#gs.discard_pile]},
+            {reply, ok, update_ps(NewPS, NewGS)};
         false ->
             {reply, {error, bad_action}, State}
     end;
@@ -647,7 +650,7 @@ pre_deal_cards(#gs{players = Players} = State) ->
     ?SEND(State#gs.game_id, FPS#ps.player_id, {actions, Choices}),
     update_ps( FPS#ps{actions = Choices}
              , State#gs{ character_deck = Cs -- FU
-                       , face_down = FD
+                       , face_down = [FD]
                        , face_up = FU
                        , character_order = []
                        , current_player = State#gs.first_player
@@ -659,6 +662,18 @@ shuffle_deck(List) ->
     ModList = lists:map(fun(E) -> {random:uniform(), E} end, List),
     SortedModList = lists:sort(ModList),
     lists:map(fun({_, E}) -> E end, SortedModList).
+
+draw_cards(N, GS) when N >= 0 ->
+    Fun = fun (_I, {Cards, InterGS}) ->
+        {Card, NewGS} = draw_card(InterGS),
+        {[Card | Cards], NewGS}
+    end,
+    lists:foldl(Fun, {[], GS}, lists:seq(1, N)).
+
+draw_card(#gs{district_deck = [], discard_pile = Disc} = GS) ->
+    draw_card(GS#gs{district_deck = shuffle_deck(Disc), discard_pile = []});
+draw_card(#gs{district_deck = [Card | Rest]} = GS) ->
+    {Card, GS#gs{district_deck = Rest}}.
 
 % Number of players in game
 num_players(#gs{player_order = PlayerOrder}) ->
