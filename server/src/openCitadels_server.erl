@@ -183,6 +183,6 @@ gamefind(GameID, State) ->
 sendplayers(PlayerIDs, Message, State) ->
     Fun = fun (ID) ->
         Pid = (lists:keyfind(ID, #player.id, State#state.players))#player.pid,
-        Pid ! Message
+        Pid ! {ID, Message}
     end,
     lists:foreach(Fun, PlayerIDs).
