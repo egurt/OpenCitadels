@@ -19,11 +19,10 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
--record(player, { id
-               , games = []
-               }).
 -record(game, { id
               , actions = []
+              , players = []
+              , current_player
               }).
 
 start_link() ->
@@ -55,40 +54,34 @@ status() ->
 init(no_args) ->
     {ok, ID} = openCitadels_server:register(),
     {ok, GID} = openCitadels_server:setup([ID], []),
-    {ok, [#player{id = ID, games = [#game{id = GID}]}]};
+    {ok, [#game{id = GID, players = [ID], current_player = ID}]};
 
 init(N) when is_integer(N) ->
     Players = [element(2, openCitadels_server:register()) || _ <- lists:seq(1,N)],
     {ok, GID} = openCitadels_server:setup(Players, []),
-    {ok, [#player{id = ID, games = [#game{id = GID}]} || ID <- Players]}.
+    {ok, [#game{id = GID, current_player = hd(Players)}]}.
 
 
-handle_call(status, _From, Players) ->
-    Game = hd((hd(Players))#player.games),
+handle_call(status, _From, [Game | _] = State) ->
     Reply = openCitadels_server:game_status(Game#game.id),
-    {reply, Reply, Players};
-
-handle_call({do, N}, _From, [#player{id = PID, games = [Game]}] = State) ->
-    Action = lists:nth(N, Game#game.actions),
-    Reply = openCitadels_server:do(Game#game.id, PID, Action),
     {reply, Reply, State};
 
-handle_call({gdo, GID, N}, _From, [#player{id = PID, games = Games}] = State) ->
-    Action = lists:nth(N, (lists:keyfind(GID, #game.id, Games))#game.actions),
-    Reply = openCitadels_server:do(GID, PID, Action),
+handle_call({do, N}, _From, [Game | _] = State) ->
+    #game{ current_player = PID
+         , actions = Actions
+         , id = ID
+         } = Game,
+    Action = lists:nth(N, Actions),
+    Reply = openCitadels_server:do(ID, PID, Action),
     {reply, Reply, State};
 
-handle_call({do, PID, N}, _From, Players) ->
-    Game = hd((lists:keyfind(PID, #player.id, Players))#player.games),
-    Action = lists:nth(N, Game#game.actions),
-    Reply = openCitadels_server:do(Game#game.id, PID, Action),
-    {reply, Reply, Players};
-
-handle_call({gdo, GID, PID, N}, _From, Players) ->
-    Games = (lists:keyfind(PID, #player.id, Players))#player.games,
-    Action = lists:nth(N, (lists:keyfind(GID, #game.id, Games))#game.actions),
+handle_call({gdo, GID, N}, _From, State) ->
+    #game{ current_player = PID
+         , actions = Actions
+         } = lists:keyfind(GID, #game.id, State),
+    Action = lists:nth(N, Actions),
     Reply = openCitadels_server:do(GID, PID, Action),
-    {reply, Reply, Players};
+    {reply, Reply, State};
 
 handle_call(Request, _From, State) ->
     io:format("Unmatched call: ~p\n", [Request]),
@@ -99,14 +92,14 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 
-handle_info({PID, {message, GID, {actions, Actions}}}, Players) ->
-    Player = lists:keyfind(PID, #player.id, Players),
-    Games = Player#player.games,
-    Game = lists:keyfind(GID, #game.id, Games),
-    NewPlayer = Player#player{games = lists:keyreplace(GID, #game.id, Games, Game#game{actions = Actions})},
+handle_info({PID, {message, GID, {actions, Actions}}}, State) ->
+    Game = lists:keyfind(GID, #game.id, State),
+    NewGame = Game#game{ current_player = PID
+                       , actions = Actions
+                       },
     io:format("~w(~w) - Actions: ~p\n", [PID, GID, Actions]),
-    {noreply, lists:keyreplace(PID, #player.id, Players, NewPlayer)};
-    
+    {noreply, lists:keyreplace(GID, #game.id, State, NewGame)};
+
 handle_info(_Msg, State) ->
     {noreply, State}.
 
