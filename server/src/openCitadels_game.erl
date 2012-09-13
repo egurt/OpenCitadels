@@ -413,9 +413,8 @@ handle_call({do, PlayerID, destroy_district = Action}, _From, State) ->
             Immune = lists:foldr(Foldr, [], PS#ps.effects),
             Act =
                 [cancel | [ {destroy, D, P}
-                || PSS <- State#gs.players
+                || #ps{player_id = P} = PSS <- State#gs.players
                 ,  not(lists:member(PSS#ps.character, Immune))
-                ,  P = PSS#ps.player_id
                 ,  D <- PSS#ps.districts
                 ,  district_cost(D) =< PS#ps.money + 1
                 ]],
@@ -727,9 +726,12 @@ district_list() ->
     Purple = [{X, purple} || X <- [3,4,5,6]],
     Base ++ Base ++ Purple ++ Purple.
 
-index(I, [I|_]) ->
+index(I, [I | _]) ->
     1;
-index(I, [_, L]) ->
-    1 + index(I, L);
+index(I, [_ | L]) ->
+    case index(I, L) of
+        false -> false;
+        N -> N + 1
+    end;
 index(_, _) ->
     false.
