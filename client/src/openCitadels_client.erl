@@ -6,7 +6,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([start_link/0, start_link/1, do/2, do/1, gdo/2, gdo/3]).
+-export([start/0, start/1, do/2, do/1, gdo/2, gdo/3]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -25,10 +25,10 @@
               , current_player
               }).
 
-start_link() ->
+start() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, no_args, []).
 
-start_link(N) ->
+start(N) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, N, []).
 
 do(N) ->
@@ -43,9 +43,9 @@ gdo(GID, N) ->
 gdo(GID, PID, N) ->
     gen_server:call(?SERVER, {gdo, GID, PID, N}).
 
-
 status() ->
     gen_server:call(?SERVER, status).
+
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
