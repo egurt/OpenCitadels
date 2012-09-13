@@ -30,7 +30,7 @@
 
 -record(ps,
         { player_id %The identifier of the current player
-        , current_character = none %The character this player is
+        , character = none %The character this player is
         , districts = [] %The districts the player has built
         , hand = [] %The cards in the players hand
         , money = 2 %The amount of money a player has
@@ -108,6 +108,7 @@ handle_call(state, _From, State) ->
 handle_call(status, _From, #gs{players = Players} = State) ->
     L = lists:flatten (
         [ [ {player, P}
+          , {character, C}
           , {money, M}
           , {districts, D}
           , {hand, H}
@@ -119,6 +120,7 @@ handle_call(status, _From, #gs{players = Players} = State) ->
                , districts = D
                , hand      = H
                , actions   = A
+               , character = C
                } <- Players
         ]),
     {reply, L, State};
@@ -139,7 +141,7 @@ handle_call({do, PlayerID, {choose, Card} = Action}, _From, State) ->
             Choices = [{choose, Char} || Char <- NewCDeck],
             NextPS = lists:nth(NextPlayer, Players),
             NewPS = PS#ps{ actions = []
-                         , current_character = Card
+                         , character = Card
                          },
             NewGS =
                 update_ps(NewPS, State),
@@ -249,7 +251,7 @@ handle_call({do, PlayerID, {assassinate, Target} = Action}, _From, State) ->
             NewPS = PS#ps{effects = Eff, actions = Act},
 
             %targetted player gets effect instant end_turn (assassinated)
-            case lists:keyfind(Target, #ps.current_character, Players) of
+            case lists:keyfind(Target, #ps.character, Players) of
                 false ->
                     NewState = update_ps(NewPS, State);
                 TarPS ->
@@ -282,7 +284,7 @@ handle_call({do, PlayerID, {steal_from, Target} = Action}, _From, State) ->
             NewPS = PS#ps{effects = Eff, actions = Act},
 
             %targetted player gets effect stolen_from
-            case lists:keyfind(Target, #ps.current_character, Players) of
+            case lists:keyfind(Target, #ps.character, Players) of
                 false ->
                     NewState = update_ps(NewPS, State);
                 TarPS ->
@@ -312,7 +314,7 @@ handle_call({do, PlayerID, stolen_from = Action}, _From, State) ->
             NewPS = set_actions(start, PS#ps{effects = Eff, money = 0}),
 
             %thief player
-            Thief = lists:keyfind(?THIEF, #ps.current_character, Players),
+            Thief = lists:keyfind(?THIEF, #ps.character, Players),
             ThGold = Thief#ps.money,
 
             NewState = update_ps(Thief#ps{money = ThGold + Gold},
@@ -412,7 +414,7 @@ handle_call({do, PlayerID, destroy_district = Action}, _From, State) ->
             Act =
                 [cancel | [ {destroy, D, P}
                 || PSS <- State#gs.players
-                ,  not(lists:member(PSS#ps.current_character, Immune))
+                ,  not(lists:member(PSS#ps.character, Immune))
                 ,  P = PSS#ps.player_id
                 ,  D <- PSS#ps.districts
                 ,  district_cost(D) =< PS#ps.money + 1
@@ -581,7 +583,7 @@ dstr_abilities(_) ->
 % call after all characters have been selected but before an actual turn starts
 init_player_effects(#gs{players = Players} = GS) ->
     Upd =
-        fun (#ps{current_character = Char} = PS, G) ->
+        fun (#ps{character = Char} = PS, G) ->
                 Chr = char_abilities(Char),
                 Dst = dstr_abilities(void),
                 NewPS = PS#ps{effects = Chr ++ Dst},
@@ -631,7 +633,7 @@ init_ps(PlayerID, {PSs, Deck}) ->
 
 pre_play_init(#gs{players = Players} = State) ->
     %Could possibly just sort the characters, depending on representation
-    Fun = fun(#ps{current_character = C, player_id = P}) -> {C, P} end,
+    Fun = fun(#ps{character = C, player_id = P}) -> {C, P} end,
     Selected = lists:map(Fun, Players),
     SelectedInOrder =
         lists:sort(fun ({C1, _}, {C2, _}) -> character_order(C1, C2) end, Selected),
