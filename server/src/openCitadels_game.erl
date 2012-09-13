@@ -535,10 +535,8 @@ char_abilities(?KING) ->
           }
     ];
 char_abilities(?BISHOP) ->
-    [ #spc{ state = start
-          , how = instant
-          , prio = 3
-          , name = warlord_immunity
+    [ #spc{ state = build
+          , name = {take_gold, blue}
           }
     ];
 char_abilities(?MERCHANT) ->
